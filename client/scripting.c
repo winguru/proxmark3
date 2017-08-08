@@ -47,6 +47,49 @@ static int l_SendCommand(lua_State *L){
     SendCommand((UsbCommand* )data);
     return 0; // no return values
 }
+
+/**
+ * @brief The following params expected:
+ * uint8_t *dest
+ * int bytes
+ * int start_index
+ * @param L
+ * @return
+ */
+static int l_GetFromBigBuf(lua_State *L){
+	
+	int len = 0;
+    int startindex = 0;
+	
+    //Check number of arguments
+    int n = lua_gettop(L);
+    if(n == 0) {
+        //signal error by returning Nil, errorstring
+        lua_pushnil(L);
+        lua_pushstring(L,"You need to supply number of len and startindex");
+        return 2; // two return values
+    }
+    if(n >= 2) {
+        len = luaL_checknumber(L, 1);
+        startindex = luaL_checknumber(L, 2);
+    }
+
+	uint8_t *data = malloc(len);
+	if ( data == NULL ) {
+        //signal error by returning Nil, errorstring
+        lua_pushnil(L);
+        lua_pushstring(L,"Allocating memory failed");
+        return 2; // two return values
+	}
+		
+	GetFromBigBuf(data, len, startindex);	
+	WaitForResponse(CMD_ACK, NULL);
+	//Push it as a string
+	lua_pushlstring(L,(const char *)data, len);
+	if (data) 
+		free(data);
+	return 1;// return 1 to signal one return value
+}
 /**
  * @brief The following params expected:
  * uint32_t cmd
@@ -93,8 +136,7 @@ static int l_WaitForResponseTimeout(lua_State *L){
     }
 }
 
-static int returnToLuaWithError(lua_State *L, const char* fmt, ...)
-{
+static int returnToLuaWithError(lua_State *L, const char* fmt, ...) {
     char buffer[200];
     va_list args;
     va_start(args,fmt);
@@ -106,35 +148,31 @@ static int returnToLuaWithError(lua_State *L, const char* fmt, ...)
     return 2;
 }
 
-static int l_nonce2key(lua_State *L){
+static int l_mfDarkside(lua_State *L){
 
-    size_t size;
-    const char *p_uid = luaL_checklstring(L, 1, &size);
-    if(size != 4)  return returnToLuaWithError(L,"Wrong size of uid, got %d bytes, expected 4", (int) size);
+	uint32_t blockno = 0;
+	uint32_t keytype = 0;
+	uint64_t key = 0;
+	size_t size;
 
-    const char *p_nt = luaL_checklstring(L, 2, &size);
-    if(size != 4)  return returnToLuaWithError(L,"Wrong size of nt, got %d bytes, expected 4", (int) size);
+    //Check number of arguments
+    int n = lua_gettop(L);
+	switch (n) {
+		case 2:{
+			const char *p_keytype = luaL_checklstring(L, 2, &size);
+			if(size != 2)  return returnToLuaWithError(L,"Wrong size of keytype, got %d bytes, expected 1", (int) size);
+			sscanf(p_keytype, "%x", &keytype);			
+		}
+		case 1: {
+			const char *p_blockno = luaL_checklstring(L, 1, &size);
+			if(size != 2)  return returnToLuaWithError(L,"Wrong size of blockno, got %d bytes, expected 2", (int) size);
+			sscanf(p_blockno, "%02x", &blockno);
+			break;
+		}
+		default : break;
+	}
 
-    const char *p_nr = luaL_checklstring(L, 3, &size);
-    if(size != 4)  return returnToLuaWithError(L,"Wrong size of nr, got %d bytes, expected 4", (int) size);
-
-    const char *p_par_info = luaL_checklstring(L, 4, &size);
-    if(size != 8)  return returnToLuaWithError(L,"Wrong size of par_info, got %d bytes, expected 8", (int) size);
-
-    const char *p_pks_info = luaL_checklstring(L, 5, &size);
-    if(size != 8)  return returnToLuaWithError(L,"Wrong size of ks_info, got %d bytes, expected 8", (int) size);
-
-
-    uint32_t uid = bytes_to_num(( uint8_t *)p_uid,4);
-    uint32_t nt = bytes_to_num(( uint8_t *)p_nt,4);
-
-    uint32_t nr = bytes_to_num(( uint8_t*)p_nr,4);
-    uint64_t par_info = bytes_to_num(( uint8_t *)p_par_info,8);
-    uint64_t ks_info = bytes_to_num(( uint8_t *)p_pks_info,8);
-
-    uint64_t key = 0;
-
-    int retval = nonce2key(uid,nt, nr, par_info,ks_info, &key);
+	int retval = mfDarkside(blockno & 0xFF, keytype & 0xFF, &key);
 
     //Push the retval on the stack
     lua_pushinteger(L,retval);
@@ -158,8 +196,7 @@ static int l_clearCommandBuffer(lua_State *L){
  * @param L
  * @return
  */
-static int l_foobar(lua_State *L)
-{
+static int l_foobar(lua_State *L) {
     //Check number of arguments
     int n = lua_gettop(L);
     printf("foobar called with %d arguments" , n);
@@ -170,7 +207,7 @@ static int l_foobar(lua_State *L)
     // UsbCommand response =  {CMD_MIFARE_READBL, {1337, 1338, 1339}};
 
     printf("Now returning a uint64_t as a string");
-    uint64_t x = 0xDEADBEEF;
+    uint64_t x = 0xDEADC0DE;
     uint8_t destination[8];
     num_to_bytes(x,sizeof(x),destination);
     lua_pushlstring(L,(const char *)&x,sizeof(x));
@@ -184,8 +221,7 @@ static int l_foobar(lua_State *L)
  * @param L
  * @return boolean, true if kbhit, false otherwise.
  */
-static int l_ukbhit(lua_State *L)
-{
+static int l_ukbhit(lua_State *L) {
     lua_pushboolean(L,ukbhit() ? true : false);
     return 1;
 }
@@ -195,24 +231,22 @@ static int l_ukbhit(lua_State *L)
  * @param L
  * @return
  */
-static int l_CmdConsole(lua_State *L)
-{
+static int l_CmdConsole(lua_State *L) {
     CommandReceived((char *)luaL_checkstring(L, 1));
     return 0;
 }
 
-static int l_iso15693_crc(lua_State *L)
-{
+static int l_iso15693_crc(lua_State *L) {
     //    uint16_t Iso15693Crc(uint8_t *v, int n);
     size_t size;
     const char *v = luaL_checklstring(L, 1, &size);
+	// iceman, should be size / 2 ?!?
     uint16_t retval = Iso15693Crc((uint8_t *) v, size);
     lua_pushinteger(L, (int) retval);
     return 1;
 }
 
-static int l_iso14443b_crc(lua_State *L)
-{
+static int l_iso14443b_crc(lua_State *L) {
 	/* void ComputeCrc14443(int CrcType,
                      const unsigned char *Data, int Length,
                      unsigned char *TransmitFirst,
@@ -221,7 +255,6 @@ static int l_iso14443b_crc(lua_State *L)
 	unsigned char buf[USB_CMD_DATA_SIZE] = {0x00};
     size_t size = 0;	
     const char *data = luaL_checklstring(L, 1, &size);
-
 	
 	for (int i = 0; i < size; i += 2)
 		sscanf(&data[i], "%02x", (unsigned int *)&buf[i / 2]);	
@@ -236,8 +269,7 @@ static int l_iso14443b_crc(lua_State *L)
  Simple AES 128 cbc hook up to OpenSSL.
  params:  key, input
 */
-static int l_aes128decrypt_cbc(lua_State *L)
-{
+static int l_aes128decrypt_cbc(lua_State *L) {
 	//Check number of arguments
 	int i;
     size_t size;
@@ -392,6 +424,32 @@ static int l_crc64(lua_State *L)
 	return 1;
 }
 
+static int l_crc64_ecma182(lua_State *L)
+{
+	//size_t size;
+	uint64_t crc = 0; 
+	unsigned char outdata[8] = {0x00};
+	//const char *p_str = luaL_checklstring(L, 1, &size);
+
+	//init
+	//crc64_ecma182(NULL, 0, &crc);
+	crc = 0x338103260CC4;
+
+	// calc hash
+	//crc64_ecma182((uint8_t*) p_str, size, &crc);
+	
+	outdata[0] = (uint8_t)(crc >> 56) & 0xff;
+	outdata[1] = (uint8_t)(crc >> 48) & 0xff;
+	outdata[2] = (uint8_t)(crc >> 40) & 0xff;
+	outdata[3] = (uint8_t)(crc >> 32) & 0xff;
+	outdata[4] = (uint8_t)(crc >> 24) & 0xff;
+	outdata[5] = (uint8_t)(crc >> 16) & 0xff;
+	outdata[6] = (uint8_t)(crc >> 8) & 0xff;
+	outdata[7] = crc & 0xff;
+	lua_pushlstring(L,(const char *)&outdata, sizeof(outdata));
+	return 1;
+}
+
 static int l_sha1(lua_State *L)
 {
 	size_t size;
@@ -534,6 +592,18 @@ static int l_hardnested(lua_State *L){
 }
 
 /**
+ * @brief l_validate_prng is a function to test is a nonce is using the weak PRNG
+ * @param L
+ * @return
+ */
+static int l_detect_prng(lua_State *L) {
+	bool valid = detect_classic_prng();
+	//Push the retval on the stack
+	lua_pushinteger(L, valid);
+	return 1;
+}
+
+/**
  * @brief Sets the lua path to include "./lualibs/?.lua", in order for a script to be
  * able to do "require('foobar')" if foobar.lua is within lualibs folder.
  * Taken from http://stackoverflow.com/questions/4125971/setting-the-global-lua-path-variable-from-c-c
@@ -559,9 +629,9 @@ int setLuaPath( lua_State* L, const char* path ) {
 int set_pm3_libraries(lua_State *L) {
     static const luaL_Reg libs[] = {
         {"SendCommand",                 l_SendCommand},
+		{"GetFromBigBuf",               l_GetFromBigBuf},
         {"WaitForResponseTimeout",      l_WaitForResponseTimeout},
-        {"nonce2key",                   l_nonce2key},
-        //{"PrintAndLog",                 l_PrintAndLog},
+		{"mfDarkside",                  l_mfDarkside},
         {"foobar",                      l_foobar},
         {"ukbhit",                      l_ukbhit},
         {"clearCommandBuffer",          l_clearCommandBuffer},
@@ -575,10 +645,12 @@ int set_pm3_libraries(lua_State *L) {
 		{"crc8legic",					l_crc8legic},
 		{"crc16",                       l_crc16},
 		{"crc64",                       l_crc64},
+		{"crc64_ecma182",				l_crc64_ecma182},
 		{"sha1",						l_sha1},
 		{"reveng_models",				l_reveng_models},
 		{"reveng_runmodel",				l_reveng_RunModel},
 		{"hardnested",					l_hardnested},
+		{"detect_prng",					l_detect_prng},
         {NULL, NULL}
     };
 

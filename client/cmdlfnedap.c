@@ -6,8 +6,7 @@
 //-----------------------------------------------------------------------------
 // Low frequency NEDAP tag commands
 //-----------------------------------------------------------------------------
-#include <string.h>
-#include <inttypes.h>
+
 #include "cmdlfnedap.h"
 static int CmdHelp(const char *Cmd);
 
@@ -36,6 +35,20 @@ int usage_lf_nedap_sim(void) {
 	PrintAndLog("Sample: lf nedap sim 112233");
 	return 0;
 }
+
+// find nedap preamble in already demoded data
+int detectNedap(uint8_t *dest, size_t *size) {
+	//make sure buffer has data
+	if (*size < 128) return -3;
+
+	size_t startIdx = 0;
+	//uint8_t preamble[] = {1,1,1,1,1,1,1,1,1,0,0,0,1};
+	uint8_t preamble[] = {1,1,1,1,1,1,1,1,1,0};
+	if (!preambleSearch(dest, preamble, sizeof(preamble), size, &startIdx))
+		return -4; //preamble not found
+	return (int) startIdx;
+}
+
 
 int GetNedapBits(uint32_t cn, uint8_t *nedapBits) {
 
@@ -89,7 +102,7 @@ int CmdLFNedapDemod(const char *Cmd) {
 		return 0;
 	}
 	size_t size = DemodBufferLen;
-	int idx = NedapDemod(DemodBuffer, &size);
+	int idx = detectNedap(DemodBuffer, &size);
 	if (idx < 0){
 		if (g_debugMode){
 			// if (idx == -5)
@@ -135,8 +148,8 @@ int CmdLFNedapDemod(const char *Cmd) {
 	raw[1] = bytebits_to_byte(DemodBuffer+idx+64,32);
 	raw[2] = bytebits_to_byte(DemodBuffer+idx+32,32);
 	raw[3] = bytebits_to_byte(DemodBuffer+idx,32);
-	setDemodBuf(DemodBuffer,128,idx);
-	setGrid_Clock(64);
+	setDemodBuf(DemodBuffer, 128, idx);
+	setClockGrid(g_DemodClock, g_DemodStartIdx + (idx*g_DemodClock));
 	
 	uint8_t firstParity = GetParity( DemodBuffer, EVEN, 63);
 	if ( firstParity != DemodBuffer[63]  ) {
@@ -202,9 +215,8 @@ lf t55xx wr b 4 d 4c0003ff
 */
 
 int CmdLFNedapRead(const char *Cmd) {
-	CmdLFRead("s");
-	getSamples("12000", TRUE);
-	return CmdLFNedapDemod("");
+	lf_read(true, 12000);
+	return CmdLFNedapDemod(Cmd);
 }
 /*
 int CmdLFNedapClone(const char *Cmd) {
@@ -233,8 +245,7 @@ int CmdLFNedapClone(const char *Cmd) {
 	blocks[0] = T55x7_MODULATION_DIPHASE | T55x7_BITRATE_RF_64 | 7 << T55x7_MAXBLOCK_SHIFT;
 
 	if (param_getchar(Cmd, 3) == 'Q' || param_getchar(Cmd, 3) == 'q')
-		//t5555 (Q5) BITRATE = (RF-2)/2 (iceman)
-		blocks[0] = T5555_MODULATION_BIPHASE | T5555_INVERT_OUTPUT | ((64-2)>>1) << T5555_BITRATE_SHIFT | 7 <<T5555_MAXBLOCK_SHIFT;
+		blocks[0] = T5555_MODULATION_BIPHASE | T5555_INVERT_OUTPUT | T5555_SET_BITRATE(64) | 7 <<T5555_MAXBLOCK_SHIFT;
 
 	blocks[1] = bytebits_to_byte(bs,32);
 	blocks[2] = bytebits_to_byte(bs+32,32);
@@ -345,9 +356,9 @@ int CmdLFNedapChk(const char *Cmd){
 	return 0;
 }
 
-
 static command_t CommandTable[] = {
     {"help",	CmdHelp,		1, "This help"},
+	{"demod",	CmdLFNedapDemod,0, "Demodulate an Nedap tag from the GraphBuffer"},	
 	{"read",	CmdLFNedapRead, 0, "Attempt to read and extract tag data"},
 //	{"clone",	CmdLFNedapClone,0, "<Card Number>  clone nedap tag"},
 	{"sim",		CmdLFNedapSim,  0, "<Card Number>  simulate nedap tag"},

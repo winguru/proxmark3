@@ -11,8 +11,12 @@
 #ifndef DATA_H__
 #define DATA_H__
 #include <stdint.h>
+#include <stdbool.h>
 #include "util.h"
+
+#define FILE_PATH_SIZE 1000												
+
 extern uint8_t* sample_buf;
-void GetFromBigBuf(uint8_t *dest, int bytes, int start_index);
-void GetEMLFromBigBuf(uint8_t *dest, uint32_t bytes, uint32_t start_index);
+extern void GetFromBigBuf(uint8_t *dest, int bytes, int start_index);
+extern bool GetEMLFromBigBuf(uint8_t *dest, uint32_t bytes, uint32_t start_index);
 #endif

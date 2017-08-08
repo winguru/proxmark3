@@ -31,6 +31,7 @@ extern "C" {
 #include "iso14443b.h"
 #include "emvcard.h"
 
+extern const uint8_t OddByteParity[256];
 extern int rsamples;   // = 0;
 extern int tracing;    // = TRUE;
 extern uint8_t trigger;
@@ -211,6 +212,7 @@ void iClass_ReadCheck(uint8_t	blockNo, uint8_t keyType);
 void SnoopHitag(uint32_t type);
 void SimulateHitagTag(bool tag_mem_supplied, byte_t* data);
 void ReaderHitag(hitag_function htf, hitag_data* htd);
+void WriterHitag(hitag_function htf, hitag_data* htd, int page);
 
 //hitagS.h
 void SimulateHitagSTag(bool tag_mem_supplied, byte_t* data);

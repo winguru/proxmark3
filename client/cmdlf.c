@@ -30,11 +30,16 @@ int usage_lf_cmdread(void) {
 	return 0;
 }
 int usage_lf_read(void){
-	PrintAndLog("Usage: lf read [h] [s]");
+	PrintAndLog("Usage: lf read [h] [s] [d numofsamples]");
 	PrintAndLog("Options:");
 	PrintAndLog("       h            This help");
 	PrintAndLog("       s            silent run no printout");
+	PrintAndLog("       d #samples   # samples to collect (optional)");	
 	PrintAndLog("Use 'lf config' to set parameters.");
+	PrintAndLog("");
+	PrintAndLog("Samples:");
+	PrintAndLog("         lf read s d 12000     - collects 12000samples silent");
+	PrintAndLog("         lf read s");
 	return 0;
 }
 int usage_lf_snoop(void) {
@@ -42,6 +47,8 @@ int usage_lf_snoop(void) {
 	PrintAndLog("Usage: lf snoop [h]");
 	PrintAndLog("Options:");
 	PrintAndLog("      h         This help");
+	PrintAndLog("This function takes no arguments. ");
+	PrintAndLog("Use 'lf config' to set parameters.");
 	return 0;
 }
 int usage_lf_config(void) {
@@ -179,8 +186,7 @@ int CmdLFCommandRead(const char *Cmd) {
 	return 0;
 }
 
-int CmdFlexdemod(const char *Cmd)
-{
+int CmdFlexdemod(const char *Cmd) {
 #define LONG_WAIT 100	
 	int i, j, start, bit, sum;
 	int phase = 0;
@@ -242,234 +248,6 @@ int CmdFlexdemod(const char *Cmd)
 		}
 	}
 	RepaintGraphWindow();
-	return 0;
-}
-  
-int CmdIndalaDemod(const char *Cmd)
-{
-	// PSK1, Bitrate 32, 
-	
-	// Usage: recover 64bit UID by default, specify "224" as arg to recover a 224bit UID
-	int state = -1;
-	int count = 0;
-	int i, j;
-
-	// worst case with GraphTraceLen=64000 is < 4096
-	// under normal conditions it's < 2048
-	uint8_t rawbits[4096];
-
-	int rawbit = 0, worst = 0, worstPos = 0;
-	// PrintAndLog("Expecting a bit less than %d raw bits", GraphTraceLen / 32);
-	
-	// loop through raw signal - since we know it is psk1 rf/32 fc/2 skip every other value (+=2)
-	for (i = 0; i < GraphTraceLen-1; i += 2) {
-		count += 1;
-		if ((GraphBuffer[i] > GraphBuffer[i + 1]) && (state != 1)) {
-			// appears redundant - marshmellow
-			if (state == 0) {
-				for (j = 0; j <  count - 8; j += 16) {
-					rawbits[rawbit++] = 0;
-				}
-				if ((abs(count - j)) > worst) {
-					worst = abs(count - j);
-					worstPos = i;
-				}
-			}
-			state = 1;
-			count = 0;
-		} else if ((GraphBuffer[i] < GraphBuffer[i + 1]) && (state != 0)) {
-			//appears redundant
-			if (state == 1) {
-				for (j = 0; j <  count - 8; j += 16) {
-					rawbits[rawbit++] = 1;
-				}
-				if ((abs(count - j)) > worst) {
-					worst = abs(count - j);
-					worstPos = i;
-				}
-			}
-			state = 0;
-			count = 0;
-		}
-	}
-	if ( rawbit<1 ) return 0;
-
-	if (g_debugMode) {
-		PrintAndLog("Recovered %d raw bits, expected: %d", rawbit, GraphTraceLen/32);
-		PrintAndLog("worst metric (0=best..7=worst): %d at pos %d", worst, worstPos);
-	}
-
-	// Finding the start of a UID
-	int uidlen, long_wait;
-	if (strcmp(Cmd, "224") == 0) {
-		uidlen = 224;
-		long_wait = 30;
-	} else {
-		uidlen = 64;
-		long_wait = 29;
-	}
-
-	int start;
-	int first = 0;
-	for (start = 0; start <= rawbit - uidlen; start++) {
-		first = rawbits[start];
-		for (i = start; i < start + long_wait; i++) {
-			if (rawbits[i] != first) {
-				break;
-			}
-		}
-		if (i == (start + long_wait)) {
-			break;
-		}
-	}
-  
-	if (start == rawbit - uidlen + 1) {
-		if (g_debugMode) PrintAndLog("nothing to wait for");
-		return 0;
-	}
-
-	// Inverting signal if needed
-	if (first == 1) {
-		for (i = start; i < rawbit; i++)
-			rawbits[i] = !rawbits[i];
-	}
-
-	// Dumping UID
-	uint8_t bits[224] = {0x00};
-	char showbits[225] = {0x00};
-	int bit;
-	i = start;
-	int times = 0;
-	
-	if (uidlen > rawbit) {
-		PrintAndLog("Warning: not enough raw bits to get a full UID");
-		for (bit = 0; bit < rawbit; bit++) {
-			bits[bit] = rawbits[i++];
-			// As we cannot know the parity, let's use "." and "/"
-			showbits[bit] = '.' + bits[bit];
-		}
-		showbits[bit+1]='\0';
-		PrintAndLog("Partial UID=%s", showbits);
-		return 0;
-	} else {
-		for (bit = 0; bit < uidlen; bit++) {
-			bits[bit] = rawbits[i++];
-			showbits[bit] = '0' + bits[bit];
-		}
-		times = 1;
-	}
-  
-	//convert UID to HEX
-	uint32_t uid1, uid2, uid3, uid4, uid5, uid6, uid7;
-	int idx;
-	uid1 = uid2 = 0;
-	
-	if (uidlen==64){
-		for( idx=0; idx<64; idx++) {
-			if (showbits[idx] == '0') {
-				uid1 = (uid1<<1) | (uid2>>31);
-				uid2 = (uid2<<1) | 0;
-			} else {
-				uid1 = (uid1<<1) | (uid2>>31);
-				uid2 = (uid2<<1) | 1;
-			} 
-		}
-		PrintAndLog("UID=%s (%x%08x)", showbits, uid1, uid2);
-	} else {
-		uid3 = uid4 = uid5 = uid6 = uid7 = 0;
-
-		for( idx=0; idx<224; idx++) {
-			uid1 = (uid1<<1) | (uid2>>31);
-			uid2 = (uid2<<1) | (uid3>>31);
-			uid3 = (uid3<<1) | (uid4>>31);
-			uid4 = (uid4<<1) | (uid5>>31);
-			uid5 = (uid5<<1) | (uid6>>31);
-			uid6 = (uid6<<1) | (uid7>>31);
-
-			if (showbits[idx] == '0') 
-				uid7 = (uid7<<1) | 0;
-			else 
-				uid7 = (uid7<<1) | 1;
-		}
-		PrintAndLog("UID=%s (%x%08x%08x%08x%08x%08x%08x)", showbits, uid1, uid2, uid3, uid4, uid5, uid6, uid7);
-	}
-
-	// Checking UID against next occurrences
-	int failed = 0;
-	for (; i + uidlen <= rawbit;) {
-		failed = 0;
-		for (bit = 0; bit < uidlen; bit++) {
-			if (bits[bit] != rawbits[i++]) {
-				failed = 1;
-				break;
-			}
-		}
-		if (failed == 1) {
-			break;
-		}
-		times += 1;
-	}
-
-	if (g_debugMode) PrintAndLog("Occurrences: %d (expected %d)", times, (rawbit - start) / uidlen);
-
-	// Remodulating for tag cloning
-	// HACK: 2015-01-04 this will have an impact on our new way of seening lf commands (demod) 
-	// since this changes graphbuffer data.
-	GraphTraceLen = 32 * uidlen;
-	i = 0;
-	int phase = 0;
-	for (bit = 0; bit < uidlen; bit++) {
-		phase = (bits[bit] == 0) ? 0 : 1;
-		int j;
-		for (j = 0; j < 32; j++) {
-			GraphBuffer[i++] = phase;
-			phase = !phase;
-		}
-	}
-
-	RepaintGraphWindow();
-	return 1;
-}
-
-int CmdIndalaClone(const char *Cmd){
-	UsbCommand c;
-	unsigned int uid1, uid2, uid3, uid4, uid5, uid6, uid7;
-
-	uid1 =  uid2 = uid3 = uid4 = uid5 = uid6 = uid7 = 0;
-	int n = 0, i = 0;
-
-	if (strchr(Cmd,'l') != 0) {
-		while (sscanf(&Cmd[i++], "%1x", &n ) == 1) {
-			uid1 = (uid1 << 4) | (uid2 >> 28);
-			uid2 = (uid2 << 4) | (uid3 >> 28);
-			uid3 = (uid3 << 4) | (uid4 >> 28);
-			uid4 = (uid4 << 4) | (uid5 >> 28);
-			uid5 = (uid5 << 4) | (uid6 >> 28);
-			uid6 = (uid6 << 4) | (uid7 >> 28);
-			uid7 = (uid7 << 4) | (n & 0xf);
-		}
-		PrintAndLog("Cloning 224bit tag with UID %x%08x%08x%08x%08x%08x%08x", uid1, uid2, uid3, uid4, uid5, uid6, uid7);
-		c.cmd = CMD_INDALA_CLONE_TAG_L;
-		c.d.asDwords[0] = uid1;
-		c.d.asDwords[1] = uid2;
-		c.d.asDwords[2] = uid3;
-		c.d.asDwords[3] = uid4;
-		c.d.asDwords[4] = uid5;
-		c.d.asDwords[5] = uid6;
-		c.d.asDwords[6] = uid7;
-	} else {
-		while (sscanf(&Cmd[i++], "%1x", &n ) == 1) {
-			uid1 = (uid1 << 4) | (uid2 >> 28);
-			uid2 = (uid2 << 4) | (n & 0xf);
-		}
-		PrintAndLog("Cloning 64bit tag with UID %x%08x", uid1, uid2);
-		c.cmd = CMD_INDALA_CLONE_TAG;
-		c.arg[0] = uid1;
-		c.arg[1] = uid2;
-	}
-
-	clearCommandBuffer();
-	SendCommand(&c);
 	return 0;
 }
 
@@ -541,12 +319,34 @@ int CmdLFSetConfig(const char *Cmd) {
 	return 0;
 }
 
+bool lf_read(bool silent, uint32_t samples) {
+	if (offline) return false;
+	UsbCommand c = {CMD_ACQUIRE_RAW_ADC_SAMPLES_125K, {silent, samples, 0}};
+	clearCommandBuffer();
+	SendCommand(&c);
+
+	UsbCommand resp;
+	if (g_lf_threshold_set) {
+		WaitForResponse(CMD_ACK, &resp);
+	} else {
+		if ( !WaitForResponseTimeout(CMD_ACK, &resp, 2500) ) {
+			PrintAndLog("command execution time out");
+			return false;
+		}
+	}
+	// resp.arg[0] is bits read not bytes read.
+	getSamples(resp.arg[0]/8, silent);
+
+	return true;
+}
+
 int CmdLFRead(const char *Cmd) {
 	
 	if (offline) return 0;
 	
 	bool errors = false;
-	bool arg1 = false;
+	bool silent = false;
+	uint32_t samples = 0;
 	uint8_t cmdp = 0;
 	while(param_getchar(Cmd, cmdp) != 0x00 && !errors) {
 		switch(param_getchar(Cmd, cmdp)) {
@@ -555,8 +355,13 @@ int CmdLFRead(const char *Cmd) {
 			return usage_lf_read();
 		case 's':
 		case 'S':
-			arg1 = true;
+			silent = true;
 			cmdp++;
+			break;
+		case 'd':
+		case 'D':  
+			samples = param_get32ex(Cmd, cmdp, 0, 10);
+			cmdp +=2;
 			break;
 		default:
 			PrintAndLog("Unknown parameter '%c'", param_getchar(Cmd, cmdp));
@@ -568,18 +373,7 @@ int CmdLFRead(const char *Cmd) {
 	//Validations
 	if (errors) return usage_lf_read();
 
-	UsbCommand c = {CMD_ACQUIRE_RAW_ADC_SAMPLES_125K, {arg1,0,0}};
-	clearCommandBuffer();
-	SendCommand(&c);
-	if ( g_lf_threshold_set ) {
-		WaitForResponse(CMD_ACK,NULL);	
-	} else {
-		if ( !WaitForResponseTimeout(CMD_ACK, NULL ,2500) ) {
-			PrintAndLog("command execution time out");
-			return 1;
-		}
-	}
-	return 0;
+	return lf_read(silent, samples);
 }
 
 int CmdLFSnoop(const char *Cmd) {
@@ -590,7 +384,7 @@ int CmdLFSnoop(const char *Cmd) {
 	clearCommandBuffer();	
 	SendCommand(&c);
 	WaitForResponse(CMD_ACK,NULL);
-	getSamples("", false);
+	getSamples(0, false);
 	return 0;
 }
 
@@ -640,8 +434,7 @@ int CmdLFSim(const char *Cmd) {
 
 // by marshmellow - sim fsk data given clock, fcHigh, fcLow, invert 
 // - allow pull data from DemodBuffer
-int CmdLFfskSim(const char *Cmd)
-{
+int CmdLFfskSim(const char *Cmd) {
 	//might be able to autodetect FCs and clock from Graphbuffer if using demod buffer
 	// otherwise will need FChigh, FClow, Clock, and bitstream
 	uint8_t fcHigh = 0, fcLow = 0, clk = 0;
@@ -700,9 +493,10 @@ int CmdLFfskSim(const char *Cmd)
 	//Validations
 	if (errors) return usage_lf_simfsk();
 
+	int firstClockEdge = 0;
 	if (dataLen == 0){ //using DemodBuffer 
 		if (clk == 0 || fcHigh == 0 || fcLow == 0){ //manual settings must set them all
-			uint8_t ans = fskClocks(&fcHigh, &fcLow, &clk, 0);
+			uint8_t ans = fskClocks(&fcHigh, &fcLow, &clk, 0, &firstClockEdge);
 			if (ans==0){
 				if (!fcHigh) fcHigh = 10;
 				if (!fcLow) fcLow = 8;
@@ -736,8 +530,7 @@ int CmdLFfskSim(const char *Cmd)
 
 // by marshmellow - sim ask data given clock, invert, manchester or raw, separator 
 // - allow pull data from DemodBuffer
-int CmdLFaskSim(const char *Cmd)
-{
+int CmdLFaskSim(const char *Cmd) {
 	// autodetect clock from Graphbuffer if using demod buffer
 	// needs clock, invert, manchester/raw as m or r, separator as s, and bitstream
 	uint8_t encoding = 1, separator = 0, clk = 0, invert = 0;
@@ -1016,30 +809,29 @@ int CmdVchDemod(const char *Cmd) {
 	return 0;
 }
 
-
 //by marshmellow
-int CheckChipset(bool getDeviceData) {
+int CheckChipType(bool getDeviceData) {
 
 	if (!getDeviceData) return 0;
 	
-	uint32_t word = 0;
-	save_restoreGB(1);
-	
+	save_restoreDB(GRAPH_SAVE);
+
 	//check for em4x05/em4x69 chips first
+	uint32_t word = 0;
 	if (EM4x05IsBlock0(&word)) {
-		save_restoreGB(0);
-		PrintAndLog("\nValid EM4x05/EM4x69 Chipset found\nTry `lf em 4x05` commands\n");
+		PrintAndLog("\nValid EM4x05/EM4x69 Chip Found\nTry lf em 4x05... commands\n");
+		save_restoreGB(GRAPH_RESTORE);
 		return 1;
 	}
 
-	//TODO check for t55xx chip...
-	// if ( t55xxIsBlock0(() {
-	// save_restoreGB(0);
-	// PrintAndLog("\nValid T55xx Chipset found\nTry `lf t55xx` commands\n");
-	// return 1;
-	// }
+	//check for t55xx chip...
+	if (tryDetectP1(true)) {
+		PrintAndLog("\nValid T55xx Chip Found\nTry `lf t55xx` commands\n");
+		save_restoreGB(GRAPH_RESTORE);
+		return 1;		
+	}
 
-	save_restoreGB(0);
+	save_restoreDB(GRAPH_RESTORE);
 	return 0;
 }
 
@@ -1049,154 +841,68 @@ int CmdLFfind(const char *Cmd) {
 	size_t minLength = 1000;
 	char cmdp = param_getchar(Cmd, 0);
 	char testRaw = param_getchar(Cmd, 1);
-	if (strlen(Cmd) > 3 || cmdp == 'h' || cmdp == 'H') return usage_lf_find();
-
-	bool getDeviceData = (!offline && (cmdp != '1') );
 	
-	if (getDeviceData) {
-		CmdLFRead("s");
-		getSamples("30000", false);
-	} else if (GraphTraceLen < minLength) {
+	if (strlen(Cmd) > 3 || cmdp == 'h' || cmdp == 'H') return usage_lf_find();
+	
+	if (cmdp == 'u' || cmdp == 'U') testRaw = 'u';
+	
+	bool isOnline = (!offline && (cmdp != '1') );
+	
+	if (isOnline)
+		lf_read(true, 30000);
+	
+	if (GraphTraceLen < minLength) {
 		PrintAndLog("Data in Graphbuffer was too small.");
 		return 0;
 	}
-	if (cmdp == 'u' || cmdp == 'U') testRaw = 'u';
 
 	PrintAndLog("NOTE: some demods output possible binary\n  if it finds something that looks like a tag");
 	PrintAndLog("False Positives ARE possible\n");  
 	PrintAndLog("\nChecking for known tags:\n");
-
-	size_t testLen = minLength;
 	
 	// only run these tests if device is online
-	if (getDeviceData) {
+	if (isOnline) {
 
 		// only run if graphbuffer is just noise as it should be for hitag/cotag
-		if (graphJustNoise(GraphBuffer, testLen)) {
+		if (is_justnoise(GraphBuffer, minLength)) {
 			
-			if (CheckChipset(getDeviceData) )
-				return 1;			
-			
-			ans=CmdLFHitagReader("26");
-			if (ans==0)
-				return 1;
+			if (CheckChipType(isOnline) ) return 1;			
+			if (CmdLFHitagReader("26")) { PrintAndLog("\nValid Hitag Found!"); return 1;}
+			if (CmdCOTAGRead("")) 		{ PrintAndLog("\nValid COTAG ID Found!"); return 1;}
 
-			ans=CmdCOTAGRead("");
-			if (ans>0){
-				PrintAndLog("\nValid COTAG ID Found!");
-				return 1;
-			}
 			PrintAndLog("Signal looks just like noise. Quitting.");
 		    return 0;
 		}
 	}
+	if (EM4x50Read("", false))	{ PrintAndLog("\nValid EM4x50 ID Found!"); return 1;}
+	if (CmdAWIDDemod(""))		{ PrintAndLog("\nValid AWID ID Found!"); goto out;}
+	if (CmdEM410xDemod(""))		{ PrintAndLog("\nValid EM410x ID Found!"); goto out;}
+	if (CmdFdxDemod(""))		{ PrintAndLog("\nValid FDX-B ID Found!"); goto out;}	
+	if (CmdGuardDemod(""))		{ PrintAndLog("\nValid Guardall G-Prox II ID Found!"); goto out; }
+	if (CmdHIDDemod(""))		{ PrintAndLog("\nValid HID Prox ID Found!"); goto out;}
+	if (CmdPSKIdteck(""))		{ PrintAndLog("\nValid Idteck ID Found!"); goto out;}
+	if (CmdIndalaDemod(""))		{ PrintAndLog("\nValid Indala ID Found!");  goto out;}
+	if (CmdIOProxDemod(""))		{ PrintAndLog("\nValid IO Prox ID Found!"); goto out;}
+	if (CmdJablotronDemod(""))	{ PrintAndLog("\nValid Jablotron ID Found!"); goto out;}
+	if (CmdLFNedapDemod(""))	{ PrintAndLog("\nValid NEDAP ID Found!"); goto out;}
+	if (CmdNexWatchDemod("")) 	{ PrintAndLog("\nValid NexWatch ID Found!"); goto out;}
+	if (CmdNoralsyDemod(""))	{ PrintAndLog("\nValid Noralsy ID Found!"); goto out;}
+	if (CmdPacDemod(""))		{ PrintAndLog("\nValid PAC/Stanley ID Found!"); goto out;}	
+	if (CmdParadoxDemod(""))	{ PrintAndLog("\nValid Paradox ID Found!"); goto out;}
+	if (CmdPrescoDemod(""))		{ PrintAndLog("\nValid Presco ID Found!"); goto out;}				 
+	if (CmdPyramidDemod(""))	{ PrintAndLog("\nValid Pyramid ID Found!"); goto out;}
+	if (CmdSecurakeyDemod(""))	{ PrintAndLog("\nValid Securakey ID Found!"); goto out;}
+	if (CmdVikingDemod(""))		{ PrintAndLog("\nValid Viking ID Found!"); goto out;}	
+	if (CmdVisa2kDemod(""))		{ PrintAndLog("\nValid Visa2000 ID Found!"); goto out;}
 
-	// identify chipset
-	CheckChipset(getDeviceData);
+	// TIdemod?  flexdemod?
 	
-	ans=CmdFSKdemodIO("");
-	if (ans>0) {
-		PrintAndLog("\nValid IO Prox ID Found!");
-		return 1;
-	}
-	ans=CmdFSKdemodPyramid("");
-	if (ans>0) {
-		PrintAndLog("\nValid Pyramid ID Found!");
-		return 1;
-	}
-	ans=CmdFSKdemodParadox("");
-	if (ans>0) {
-		PrintAndLog("\nValid Paradox ID Found!");
-		return 1;
-	}
-	ans=CmdFSKdemodAWID("");
-	if (ans>0) {
-		PrintAndLog("\nValid AWID ID Found!");
-		return 1;
-	}
-	ans=CmdFSKdemodHID("");
-	if (ans>0) {
-		PrintAndLog("\nValid HID Prox ID Found!");
-		return 1;
-	}
-	ans=CmdAskEM410xDemod("");
-	if (ans>0) {
-		PrintAndLog("\nValid EM410x ID Found!");
-		return 1;
-	}
-	ans=CmdG_Prox_II_Demod("");
-	if (ans>0) {
-		PrintAndLog("\nValid Guardall G-Prox II ID Found!");
-		return 1;
-	}
-	ans=CmdFDXBdemodBI("");
-	if (ans>0) {
-		PrintAndLog("\nValid FDX-B ID Found!");
-		return 1;
-	}
-	ans=EM4x50Read("", false);
-	if (ans>0) {
-		PrintAndLog("\nValid EM4x50 ID Found!");
-		return 1;
-	}	
-	ans=CmdVikingDemod("");
-	if (ans>0) {
-		PrintAndLog("\nValid Viking ID Found!");
-		return 1;
-	}	
-	ans=CmdIndalaDecode("");
-	if (ans>0) {
-		PrintAndLog("\nValid Indala ID Found!");
-		return 1;
-	}
-	ans=CmdPSKNexWatch("");
-	if (ans>0) {
-		PrintAndLog("\nValid NexWatch ID Found!");
-		return 1;
-	}
-	ans=CmdPSKIdteck("");
-	if (ans>0) {
-		PrintAndLog("\nValid Idteck ID Found!");
-		return 1;
-	}
-	ans=CmdJablotronDemod("");
-	if (ans>0) {
-		PrintAndLog("\nValid Jablotron ID Found!");
-		return 1;
-	}
-	ans=CmdLFNedapDemod("");
-	if (ans>0) {
-		PrintAndLog("\nValid NEDAP ID Found!");
-		return 1;
-	}
-	ans=CmdVisa2kDemod("");
-	if (ans>0) {
-		PrintAndLog("\nValid Visa2000 ID Found!");
-		return 1;
-	}
-	ans=CmdNoralsyDemod("");
-	if (ans>0) {
-		PrintAndLog("\nValid Noralsy ID Found!");
-		return 1;
-	}
-	ans=CmdPrescoDemod("");
-	if (ans>0) {
-		PrintAndLog("\nValid Presco ID Found!");
-		return 1;
-	}				 
-	ans=CmdPacDemod("");
-	if (ans>0) {
-		PrintAndLog("\nValid PAC/Stanley ID Found!");
-		return 1;
-	}	
-
-	// TIdemod?
 	PrintAndLog("\nNo Known Tags Found!\n");
+	
 	if (testRaw=='u' || testRaw=='U'){
 		//test unknown tag formats (raw mode)
 		PrintAndLog("\nChecking for Unknown tags:\n");
-		ans=AutoCorrelate(4000, FALSE, FALSE);
-	
+		ans = AutoCorrelate(GraphBuffer, GraphBuffer, GraphTraceLen, 4000, false, false);
 		if (ans > 0) {
 
 			PrintAndLog("Possible Auto Correlation of %d repeating samples",ans);
@@ -1224,64 +930,63 @@ int CmdLFfind(const char *Cmd) {
 			}
 		}
 
-		ans=GetFskClock("",false,false); 
-		if (ans != 0){ //fsk
-			ans=FSKrawDemod("",true);
-			if (ans>0) {
-				PrintAndLog("\nUnknown FSK Modulated Tag Found!");
-				return 1;
+		 //fsk
+		if ( GetFskClock("",false,false) ) {
+			if ( FSKrawDemod("",true) ) { 
+				PrintAndLog("\nUnknown FSK Modulated Tag Found!"); goto out;
 			}
 		}
-		bool st = TRUE;
-		ans=ASKDemod_ext("0 0 0",TRUE,FALSE,1,&st);
-		if (ans>0) {
+		
+		bool st = true;
+		if ( ASKDemod_ext("0 0 0",true,false,1,&st) ) {
 		  PrintAndLog("\nUnknown ASK Modulated and Manchester encoded Tag Found!");
 		  PrintAndLog("\nif it does not look right it could instead be ASK/Biphase - try 'data rawdemod ab'");
-		  return 1;
+		  goto out;
 		}
 		
-		ans=CmdPSK1rawDemod("");
-		if (ans>0) {
+		if ( CmdPSK1rawDemod("") ) {
 			PrintAndLog("Possible unknown PSK1 Modulated Tag Found above!\n\nCould also be PSK2 - try 'data rawdemod p2'");
 			PrintAndLog("\nCould also be PSK3 - [currently not supported]");
 			PrintAndLog("\nCould also be NRZ - try 'data nrzrawdemod");
-			return 1;
+			goto out;
 		}
+		
 		PrintAndLog("\nNo Data Found!\n");
 	}
+out:
+	// identify chipset
+	CheckChipType(isOnline);
 	return 0;
 }
 
 static command_t CommandTable[] = {
 	{"help",        CmdHelp,            1, "This help"},
-	{"animal",      CmdLFFdx,           1, "{ Animal RFIDs...            }"},
 	{"awid",        CmdLFAWID,          1, "{ AWID RFIDs...              }"},
-	{"cotag",       CmdLFCOTAG,         1, "{ COTAG RFIDs...             }"},
-	{"em",          CmdLFEM4X,          1, "{ EM4X RFIDs...              }"},
-	{"guard",       CmdLFGuard,         1, "{ Guardall RFIDs...          }"},
+	{"cotag",       CmdLFCOTAG,         1, "{ COTAG CHIPs...             }"},
+	{"em",          CmdLFEM4X,          1, "{ EM4X CHIPs & RFIDs...      }"},
+	{"fdx",         CmdLFFdx,           1, "{ FDX-B RFIDs...             }"},
+	{"gproxii",     CmdLFGuard,			1, "{ Guardall Prox II RFIDs...  }"},
 	{"hid",         CmdLFHID,           1, "{ HID RFIDs...               }"},
-	{"hitag",       CmdLFHitag,         1, "{ HITAG RFIDs...             }"},
-//	{"indala",		CmdLFIndala,		1, "{ Indala RFIDs...            }"},
-	{"io",			CmdLFIO,			1, "{ IOPROX RFIDs...            }"},
+	{"hitag",       CmdLFHitag,         1, "{ Hitag CHIPs...             }"},
+	{"indala",      CmdLFINDALA,        1, "{ Indala RFIDs...            }"},
+	{"io",          CmdLFIO,            1, "{ ioProx RFIDs...            }"},
 	{"jablotron",	CmdLFJablotron,		1, "{ Jablotron RFIDs...         }"},
 	{"nedap",		CmdLFNedap,			1, "{ Nedap RFIDs...             }"},
-	{"nexwatch",    CmdLFNexWatch,      1, "{ NexWatch RFIDs...          }"},
+	{"nexwatch",    CmdLFNEXWATCH,      1, "{ NexWatch RFIDs...          }"},
 	{"noralsy",		CmdLFNoralsy,		1, "{ Noralsy RFIDs...           }"},	
 	{"pac",         CmdLFPac,           1, "{ PAC/Stanley RFIDs...       }"},
-	{"pcf7931",     CmdLFPCF7931,       1, "{ PCF7931 RFIDs...           }"},
+	{"paradox",     CmdLFParadox,       1, "{ Paradox RFIDs...           }"},
+	{"pcf7931",     CmdLFPCF7931,       1, "{ PCF7931 CHIPs...           }"},
 	{"presco",      CmdLFPresco,        1, "{ Presco RFIDs...            }"},
 	{"pyramid",		CmdLFPyramid,       1, "{ Farpointe/Pyramid RFIDs... }"},	
 	{"securakey",   CmdLFSecurakey,     1, "{ Securakey RFIDs...         }"},
-	{"ti",          CmdLFTI,            1, "{ TI RFIDs...                }"},
-	{"t55xx",       CmdLFT55XX,         1, "{ T55xx RFIDs...             }"},
-
+	{"ti",          CmdLFTI,            1, "{ TI CHIPs...                }"},
+	{"t55xx",       CmdLFT55XX,         1, "{ T55xx CHIPs...             }"},
 	{"viking",      CmdLFViking,        1, "{ Viking RFIDs...            }"},
 	{"visa2000",    CmdLFVisa2k,        1, "{ Visa2000 RFIDs...          }"},
 	{"config",      CmdLFSetConfig,     0, "Set config for LF sampling, bit/sample, decimation, frequency"},
 	{"cmdread",     CmdLFCommandRead,   0, "<off period> <'0' period> <'1' period> <command> ['h' 134] \n\t\t-- Modulate LF reader field to send command before read (all periods in microseconds)"},
 	{"flexdemod",   CmdFlexdemod,       1, "Demodulate samples for FlexPass"},
-	{"indalademod", CmdIndalaDemod,     1, "['224'] -- Demodulate samples for Indala 64 bit UID (option '224' for 224 bit)"},
-	{"indalaclone", CmdIndalaClone,     0, "<UID> ['l']-- Clone Indala to T55x7 (tag must be in antenna)(UID in HEX)(option 'l' for 224 UID"},
 	{"read",        CmdLFRead,          0, "['s' silent] Read 125/134 kHz LF ID-only tag. Do 'lf read h' for help"},
 	{"search",      CmdLFfind,          1, "[offline] ['u'] Read and Search for valid known tag (in offline mode it you can load first then search) \n\t\t-- 'u' to search for unknown tags"},
 	{"sim",         CmdLFSim,           0, "[GAP] -- Simulate LF tag from buffer with optional GAP (in microseconds)"},

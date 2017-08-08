@@ -27,7 +27,7 @@
 #endif
 
 // Craig Young - 14a stand-alone code
-#ifdef WITH_ISO14443a_StandAlone
+#ifdef WITH_HF_YOUNG
  #include "iso14443a.h"
  #include "protocols.h"
 #endif
@@ -320,6 +320,37 @@ void SendVersion(void)
 	cmd_send(CMD_ACK, *(AT91C_DBGU_CIDR), text_and_rodata_section_size + compressed_data_section_size, 0, VersionString, strlen(VersionString));
 }
 
+// detection of which Standalone Modes is installed
+// (iceman)
+void printStandAloneModes(void){
+	#if defined(WITH_HF_YOUNG) || defined(WITH_LF_SAMYRUN)
+	DbpString("Installed StandAlone Mods");
+	#endif
+	#if defined(WITH_ICEMAN)
+	DbpString("LF sniff/clone/simulation -  aka IceRun (iceman)");
+	#endif
+	#if defined(WITH_HF_YOUNG) // WITH_HF_YOUNG
+	DbpString("HF Mifare sniff/simulation - (Craig Young)");
+	#endif
+	#if defined(WITH_LF_SAMYRUN)  // 
+	DbpString("LF HID26 standalone - aka SamyRun (Samy Kamkar)");
+	#endif
+	#if defined(WITH_LF_PROXBRUTE)
+	DbpString("LF HID ProxII bruteforce - aka Proxbrute (Brad Antoniewicz)");
+	#endif 
+	#if defined(WITH_LF_HIDCORP)
+	DbpString("LF HID corporate 1000 bruteforce - (Federi Codotta)");
+	#endif 
+	#if defined(WITH_HF_MATTYRUN)
+	DbpString("HF Mifare sniff/clone - aka MattyRun (Matta Real)");
+	#endif 
+	
+	//.. add your own standalone detection based on with compiler directive you are used.
+	// don't "reuse" the already taken ones, this will make things easier when trying to detect the different modes
+	// 2017-08-06  must adapt the makefile and have individual compilation flags for all mods
+	// 
+}
+
 // measure the USB Speed by sending SpeedTestBufferSize bytes to client and measuring the elapsed time.
 // Note: this mimics GetFromBigbuf(), i.e. we have the overhead of the UsbCommand structure included.
 void printUSBSpeed(void) 
@@ -362,10 +393,11 @@ void SendStatus(void) {
 	Dbprintf("  ToSendMax...............%d", ToSendMax);
 	Dbprintf("  ToSendBit...............%d", ToSendBit);
 	Dbprintf("  ToSend BUFFERSIZE.......%d", TOSEND_BUFFER_SIZE);
+	printStandAloneModes();
 	cmd_send(CMD_ACK,1,0,0,0,0);
 }
 
-#if defined(WITH_ISO14443a_StandAlone) || defined(WITH_LF)
+#if defined(WITH_HF_YOUNG) || defined(WITH_LF_SAMYRUN)
 
 #define OPTS 2
 void StandAloneMode()
@@ -384,7 +416,7 @@ void StandAloneMode()
 }
 #endif
 
-#ifdef WITH_ISO14443a_StandAlone
+#ifdef WITH_HF_YOUNG
 
 typedef struct {
 	uint8_t uid[10];
@@ -639,7 +671,7 @@ void StandAloneMode14a()
 		}
 	}
 }
-#elif WITH_LF
+#elif WITH_LF_SAMYRUN
 // samy's sniff and repeat routine for LF
 void SamyRun()
 {
@@ -929,15 +961,19 @@ void UsbPacketReceived(uint8_t *packet, int len)
 		case CMD_SET_LF_SAMPLING_CONFIG:
 			setSamplingConfig((sample_config *) c->d.asBytes);
 			break;
-		case CMD_ACQUIRE_RAW_ADC_SAMPLES_125K:
-			cmd_send(CMD_ACK, SampleLF(c->arg[0]),0,0,0,0);
+		case CMD_ACQUIRE_RAW_ADC_SAMPLES_125K: {
+			uint32_t bits = SampleLF(c->arg[0], c->arg[1]);
+			cmd_send(CMD_ACK, bits, 0, 0, 0, 0);
 			break;
+		}
 		case CMD_MOD_THEN_ACQUIRE_RAW_ADC_SAMPLES_125K:
 			ModThenAcquireRawAdcSamples125k(c->arg[0], c->arg[1], c->arg[2], c->d.asBytes);
 			break;
-		case CMD_LF_SNOOP_RAW_ADC_SAMPLES:
-			cmd_send(CMD_ACK,SnoopLF(),0,0,0,0);
+		case CMD_LF_SNOOP_RAW_ADC_SAMPLES: {
+			uint32_t bits = SnoopLF();
+			cmd_send(CMD_ACK, bits, 0, 0, 0, 0);
 			break;
+		}
 		case CMD_HID_DEMOD_FSK:
 			CmdHIDdemodFSK(c->arg[0], 0, 0, 1);
 			break;
@@ -1043,7 +1079,12 @@ void UsbPacketReceived(uint8_t *packet, int len)
 			ReadHitagS((hitag_function)c->arg[0],(hitag_data*)c->d.asBytes);
 			break;
 		case CMD_WR_HITAG_S: //writer for Hitag tags args=data to write,page and key or challenge
+			if ((hitag_function)c->arg[0] < 10) {
 			WritePageHitagS((hitag_function)c->arg[0],(hitag_data*)c->d.asBytes,c->arg[2]);
+			}
+			else if ((hitag_function)c->arg[0] >= 10) {
+			  WriterHitag((hitag_function)c->arg[0],(hitag_data*)c->d.asBytes, c->arg[2]);
+			}
 			break;
 #endif
 
@@ -1085,7 +1126,15 @@ void UsbPacketReceived(uint8_t *packet, int len)
 			LegicRfInfo();
 			break;
 		case CMD_LEGIC_ESET:
-			LegicEMemSet(c->arg[0], c->arg[1], c->d.asBytes);
+			//-----------------------------------------------------------------------------
+			// Note: we call FpgaDownloadAndGo(FPGA_BITSTREAM_HF) here although FPGA is not
+			// involved in dealing with emulator memory. But if it is called later, it might
+			// destroy the Emulator Memory.
+			//-----------------------------------------------------------------------------
+			// arg0 = offset
+			// arg1 = num of bytes
+			FpgaDownloadAndGo(FPGA_BITSTREAM_HF);
+			emlSet(c->d.asBytes, c->arg[0], c->arg[1]);
 			break;
 #endif
 
@@ -1505,14 +1554,14 @@ void  __attribute__((noreturn)) AppMain(void)
 		}
 		WDT_HIT();
 
-#ifdef WITH_LF
-#ifndef WITH_ISO14443a_StandAlone
+#ifdef WITH_LF_SAMYRUN
+#ifndef WITH_HF_YOUNG
 		if (BUTTON_HELD(1000) > 0)
 			SamyRun();
 #endif
 #endif
 #ifdef WITH_ISO14443a
-#ifdef WITH_ISO14443a_StandAlone
+#ifdef WITH_HF_YOUNG
 		if (BUTTON_HELD(1000) > 0)
 			StandAloneMode14a();
 #endif

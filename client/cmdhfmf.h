@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
 #include "proxmark3.h"
 #include "iso14443crc.h"
 #include "data.h"
@@ -23,8 +24,11 @@
 #include "common.h"
 #include "util.h"
 #include "mifare.h" // nonces_t struct
+#include "mfkey.h"  // mfkey32_moebious
 #include "cmdhfmfhard.h"
-#include "nonce2key/nonce2key.h"
+#include "mifarehost.h"
+#include "util_posix.h" // msclock
+
 
 extern int CmdHFMF(const char *Cmd);
 
@@ -63,4 +67,5 @@ extern int CmdHf14AMfSetMod(const char *Cmd);
 void showSectorTable(void);
 void readerAttack(nonces_t data, bool setEmulatorMem, bool verbose);
 void printKeyTable( uint8_t sectorscnt, sector_t *e_sector );
+void printKeyTable_fast( uint8_t sectorscnt, icesector_t *e_sector, uint64_t bar, uint64_t foo );
 #endif

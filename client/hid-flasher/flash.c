@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "sleep.h"
+#include "util_posix.h"
 #include "proxusb.h"
 #include "flash.h"
 #include "elf.h"
@@ -333,9 +333,9 @@ static int enter_bootloader(void)
 		fprintf(stderr,"Waiting for Proxmark to reappear on USB...");
 
 		CloseProxmark();
-		sleep(1);
+		msleep(1000);
 		while (!OpenProxmark(0)) {
-			sleep(1);
+			msleep(1000);
 			fprintf(stderr, ".");
 		}
 		fprintf(stderr," Found.\n");

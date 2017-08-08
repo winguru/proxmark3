@@ -21,17 +21,27 @@ APP_CFLAGS = -DWITH_CRC \
 			 -DWITH_ISO14443a \
 			 -DWITH_ICLASS \
 			 -DWITH_HFSNOOP \
-			 -DWITH_ISO14443a_StandAlone \
+			 -DWITH_HF_YOUNG \
+			 -DWITH_LF_SAMYRUN \
 			 -fno-strict-aliasing -ffunction-sections -fdata-sections
 ### IMPORTANT -  move the commented variable below this line
 #			 -DWITH_LCD \
+#
+# Standalone Mods
+#-------------------------------------------------------
+# -DWITH_ICEMAN
+# -DWITH_LF_SAMYRUN
+# -DWITH_LF_PROXBRUTE
+# -DWITH_LF_HIDCORP
+# -DWITH_HF_YOUNG
+# -DWITH_HF_MATTYRUN
 
 SRC_LCD = fonts.c LCD.c
 SRC_LF = lfops.c hitag2.c hitagS.c lfsampling.c pcf7931.c lfdemod.c
 SRC_ISO15693 = iso15693.c iso15693tools.c
 SRC_ISO14443a = iso14443a.c mifareutil.c mifarecmd.c mifaresniff.c epa.c
 SRC_ISO14443b = iso14443b.c
-SRC_CRAPTO1 = crapto1.c crypto1.c des.c aes.c desfire_key.c desfire_crypto.c mifaredesfire.c
+SRC_CRAPTO1 = crypto1.c des.c aes.c desfire_key.c desfire_crypto.c mifaredesfire.c
 SRC_CRC = iso14443crc.c crc.c crc16.c crc32.c 
 SRC_EMV = tlv.c emvdataels.c emvutil.c emvcmd.c 									 
 SRC_ICLASS = iclass.c optimized_cipher.c

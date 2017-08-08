@@ -10,27 +10,9 @@
 #ifndef __UTIL_H_
 #define __UTIL_H_
 
-#include <stdio.h>
 #include <stdint.h>		//included in data.h
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <math.h>		// math.pow
-#include <time.h>       // time, gmtime
-#include "proxmark3.h"	// time_t
-#include "data.h"		// for FILE_PATH_SIZE
-
-#include <time.h>
-// Handle platform specific includes
-#ifndef _WIN32
-  #include <termios.h>
-  #include <sys/ioctl.h>
-  #include <sys/time.h>
-  #include <unistd.h>  
-#else
-  #include <conio.h>
-  #include <windows.h>
-#endif
+#include <stddef.h>
+#include <inttypes.h>
 
 #ifdef ANDROID
   #include <endian.h>
@@ -71,9 +53,6 @@
 # define BSWAP_16(x) ((( ((x) & 0xFF00 ) >> 8))| ( (((x) & 0x00FF) << 8)))
 #endif
 
-// Boolean
-#define TRUE                        1
-#define FALSE                       0
 #define EVEN                        0
 #define ODD                         1
 
@@ -130,6 +109,7 @@ extern void num_to_bytebitsLSBF(uint64_t n, size_t len, uint8_t *dest);
 extern uint8_t *SwapEndian64(const uint8_t *src, const size_t len, const uint8_t blockSize);
 extern void SwapEndian64ex(const uint8_t *src, const size_t len, const uint8_t blockSize, uint8_t *dest);
 
+extern int param_getlength(const char *line, int paramnum);
 extern char param_getchar(const char *line, int paramnum);
 extern int param_getptr(const char *line, int *bg, int *en, int paramnum);
 extern uint8_t param_get8(const char *line, int paramnum);
@@ -151,13 +131,12 @@ extern void wiegand_add_parity(uint8_t *target, uint8_t *source, uint8_t length)
 
 extern void xor(unsigned char * dst, unsigned char * src, size_t len);
 extern int32_t le24toh (uint8_t data[3]);
-#ifndef ANDROID
-extern uint32_t le32toh (uint8_t *data);
-#endif
+
 extern uint32_t PackBits(uint8_t start, uint8_t len, uint8_t* bits);
 extern void rol(uint8_t *data, const size_t len);
 extern uint32_t SwapBits(uint32_t value, int nrbits);
 extern uint32_t reflect(uint32_t v, int b);
 extern uint64_t HornerScheme(uint64_t num, uint64_t divider, uint64_t factor);
 
+extern int num_CPUs(void);			// number of logical CPUs
 #endif

@@ -9,21 +9,37 @@
 //-----------------------------------------------------------------------------
 
 #include "util.h"
+
+#include <stdint.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
+#include "data.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #define MAX_BIN_BREAK_LENGTH   (3072+384+1)
 
 #ifndef _WIN32
-#include <sys/ttydefaults.h>
+#include <termios.h>
+#include <sys/ioctl.h> 
+#include <unistd.h>
 
 int ukbhit(void) {
-  int cnt = 0;
-  int error;
-  static struct termios Otty, Ntty;
+	int cnt = 0;
+	int error;
+	static struct termios Otty, Ntty;
 
 	if ( tcgetattr(STDIN_FILENO, &Otty) == -1) return -1;
 
-  Ntty = Otty;
-	Ntty.c_iflag		= 0x000;	// input mode
-	Ntty.c_oflag		= 0x000;	// output mode
+	Ntty = Otty;
+
+	Ntty.c_iflag          = 0x0000;   // input mode
+	Ntty.c_oflag          = 0x0000;   // output mode
 	Ntty.c_lflag		&= ~ICANON;	// control mode = raw
 	Ntty.c_cc[VMIN]		= 1;		// return if at least 1 character is in the queue
 	Ntty.c_cc[VTIME]	= 0;		// no timeout. Wait forever
@@ -31,12 +47,13 @@ int ukbhit(void) {
 	if (0 == (error = tcsetattr(STDIN_FILENO, TCSANOW, &Ntty))) {	// set new attributes
 		error += ioctl(STDIN_FILENO, FIONREAD, &cnt);				// get number of characters available
 		error += tcsetattr(STDIN_FILENO, TCSANOW, &Otty);			// reset attributes
-  }
-
-  return ( error == 0 ? cnt : -1 );
+	}
+	return ( error == 0 ? cnt : -1 );
 }
 
 #else
+
+#include <conio.h>
 int ukbhit(void) {
 	return kbhit();
 }
@@ -61,10 +78,7 @@ void AddLogLine(char *file, char *extData, char *c) {
 	fprintf(f, "%s", extData);
 	fprintf(f, "%s\n", c);
 	fflush(f);
-	if (f) {
-		fclose(f);
-		f = NULL;
-	}
+	fclose(f);
 }
 
 void AddLogHex(char *fileName, char *extData, const uint8_t * data, const size_t len){
@@ -74,8 +88,7 @@ void AddLogHex(char *fileName, char *extData, const uint8_t * data, const size_t
 void AddLogUint64(char *fileName, char *extData, const uint64_t data) {
 	char buf[20] = {0};
 	memset(buf, 0x00, sizeof(buf));
-	//sprintf(buf, "%X%X", (unsigned int)((data & 0xFFFFFFFF00000000) >> 32), (unsigned int)(data & 0xFFFFFFFF));
-	sprintf(buf, "%012" PRIx64 "", data);
+	sprintf(buf, "%016" PRIx64 "", data);
 	AddLogLine(fileName, extData, buf);
 }
 
@@ -144,19 +157,21 @@ char *sprint_bin_break(const uint8_t *data, const size_t len, const uint8_t brea
 	
 	// make sure we don't go beyond our char array memory
 	size_t in_index = 0, out_index = 0;
-	int rowlen;	
-	if (breaks==0)
-		rowlen = ( len > MAX_BIN_BREAK_LENGTH ) ? MAX_BIN_BREAK_LENGTH : len;
-	else
+	
+	int rowlen = (len > MAX_BIN_BREAK_LENGTH ) ? MAX_BIN_BREAK_LENGTH : len;
+		
+	if ( breaks > 0 && len % breaks != 0) 
 		rowlen = ( len+(len/breaks) > MAX_BIN_BREAK_LENGTH ) ? MAX_BIN_BREAK_LENGTH : len+(len/breaks);
-
+	
+	//printf("(sprint_bin_break) rowlen %d\n", rowlen);
+	
 	static char buf[MAX_BIN_BREAK_LENGTH]; // 3072 + end of line characters if broken at 8 bits
 	//clear memory
 	memset(buf, 0x00, sizeof(buf));
 	char *tmp = buf;
 
 	// loop through the out_index to make sure we don't go too far
-	for (out_index=0; out_index < rowlen-1; out_index++) {
+	for (out_index=0; out_index < rowlen; out_index++) {
 		// set character
 		sprintf(tmp++, "%u", data[in_index]);
 		// check if a line break is needed and we have room to print it in our array
@@ -171,6 +186,44 @@ char *sprint_bin_break(const uint8_t *data, const size_t len, const uint8_t brea
 	sprintf(tmp++, "%u", data[in_index]);
 	return buf;
 }
+/*
+void sprint_bin_break_ex(uint8_t *src, size_t srclen, char *dest , uint8_t breaks) {
+	if ( src == NULL ) return;
+	if ( srclen < 1 ) return;
+	
+	// make sure we don't go beyond our char array memory
+	size_t in_index = 0, out_index = 0;
+	int rowlen;	
+	if (breaks==0)
+		rowlen = ( len > MAX_BIN_BREAK_LENGTH ) ? MAX_BIN_BREAK_LENGTH : len;
+	else
+		rowlen = ( len+(len/breaks) > MAX_BIN_BREAK_LENGTH ) ? MAX_BIN_BREAK_LENGTH : len+(len/breaks);
+
+	printf("(sprint_bin_break) rowlen %d\n", rowlen);
+	
+	// 3072 + end of line characters if broken at 8 bits
+	dest = (char *)malloc(MAX_BIN_BREAK_LENGTH); 
+	if (dest == NULL) return;
+	
+	//clear memory
+	memset(dest, 0x00, sizeof(dest));
+
+	// loop through the out_index to make sure we don't go too far
+	for (out_index=0; out_index < rowlen-1; out_index++) {
+		// set character
+		sprintf(dest++, "%u", src[in_index]);
+		// check if a line break is needed and we have room to print it in our array
+		if ( (breaks > 0) && !((in_index+1) % breaks) && (out_index+1 != rowlen) ) {
+			// increment and print line break
+			out_index++;
+			sprintf(dest++, "%s","\n");
+		}
+		in_index++;
+	}
+	// last char.
+	sprintf(dest++, "%u", src[in_index]);
+}
+*/
 
 char *sprint_bin(const uint8_t *data, const size_t len) {
 	return sprint_bin_break(data, len, 0);
@@ -274,7 +327,7 @@ void SwapEndian64ex(const uint8_t *src, const size_t len, const uint8_t blockSiz
 
 //  -------------------------------------------------------------------------
 //  line     - param line
-//  bg, en   - symbol numbers in param line of beginning an ending parameter
+//  bg, en   - symbol numbers in param line of beginning and ending parameter
 //  paramnum - param number (from 0)
 //  -------------------------------------------------------------------------
 int param_getptr(const char *line, int *bg, int *en, int paramnum)
@@ -306,10 +359,19 @@ int param_getptr(const char *line, int *bg, int *en, int paramnum)
 	return 0;
 }
 
+int param_getlength(const char *line, int paramnum)
+{
+	int bg, en;
+	
+	if (param_getptr(line, &bg, &en, paramnum)) return 0;
+
+	return en - bg + 1;
+}
+
 char param_getchar(const char *line, int paramnum)
 {
 	int bg, en;
-	if (param_getptr(line, &bg, &en, paramnum)) return 0x00;
+	if (param_getptr(line, &bg, &en, paramnum)) return 0;
 	return line[bg];
 }
 
@@ -399,9 +461,6 @@ int param_gethex_ex(const char *line, int paramnum, uint8_t * data, int *hexcnt)
 	int bg, en, i;
 	uint32_t temp;
 
-	//if (hexcnt % 2)
-	//	return 1;
-	
 	if (param_getptr(line, &bg, &en, paramnum)) return 1;
 
 	*hexcnt = en - bg + 1;
@@ -534,11 +593,6 @@ void xor(unsigned char * dst, unsigned char * src, size_t len) {
 int32_t le24toh (uint8_t data[3]) {
     return (data[2] << 16) | (data[1] << 8) | data[0];
 }
-#ifndef ANDROID
-uint32_t le32toh (uint8_t *data) {
-	return (uint32_t)( (data[3]<<24) | (data[2]<<16) | (data[1]<<8) | data[0]);
-}
-#endif
 // Pack a bitarray into a uint32_t.  
 uint32_t PackBits(uint8_t start, uint8_t len, uint8_t* bits) {
 
@@ -597,4 +651,20 @@ uint64_t HornerScheme(uint64_t num, uint64_t divider, uint64_t factor) {
    if(!(quotient == 0 && remainder == 0))
    result += HornerScheme(quotient, divider, factor) * factor + remainder;
    return result;
+}
+
+// determine number of logical CPU cores (use for multithreaded functions)
+extern int num_CPUs(void)
+{
+#if defined(_WIN32)
+	#include <sysinfoapi.h>
+	SYSTEM_INFO sysinfo;
+	GetSystemInfo(&sysinfo);
+	return sysinfo.dwNumberOfProcessors;
+#elif defined(__linux__) || defined(__APPLE__)
+	#include <unistd.h>
+	return sysconf(_SC_NPROCESSORS_ONLN);
+#else
+	return 1;
+#endif
 }

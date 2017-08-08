@@ -11,6 +11,9 @@
 //-----------------------------------------------------------------------------
 #include "nonce2key.h"
 
+// called with a uint8_t *x  array
+#define LE32TOH(x)  (uint32_t)( ( (x)[3]<<24) | ( (x)[2]<<16) | ( (x)[1]<<8) | (x)[0]);
+
 int nonce2key(uint32_t uid, uint32_t nt, uint32_t nr, uint64_t par_info, uint64_t ks_info, uint64_t * key) {
 	struct Crypto1State *state;
 	uint32_t i, pos, rr = 0, nr_diff;
@@ -44,15 +47,15 @@ int nonce2key(uint32_t uid, uint32_t nt, uint32_t nr, uint64_t par_info, uint64_
 	}
 	PrintAndLog("+----+--------+---+-----+---------------+");
 
-	clock_t t1 = clock();
+	uint64_t t1 = msclock();
 
 	state = lfsr_common_prefix(nr, rr, ks3x, par);
 	lfsr_rollback_word(state, uid ^ nt, 0);
 	crypto1_get_lfsr(state, key);
 	crypto1_destroy(state);
 
-	t1 = clock() - t1;
-	if ( t1 > 0 ) PrintAndLog("Time in nonce2key: %.0f ticks", (float)t1);
+	t1 = msclock() - t1;
+	PrintAndLog("Time in nonce2key: %.0f ticks", (float)t1/1000.0);
 	return 0;
 }
 
@@ -179,7 +182,7 @@ out:
 	return retval;
 }
 
-// 32 bit recover key from 2 nonces
+// 32 bit recover key from 2 nonces, with same nonce
 bool tryMfk32(nonces_t data, uint64_t *outputkey, bool verbose) {
 	struct Crypto1State *s,*t;
 	uint64_t outkey = 0;
@@ -190,7 +193,7 @@ bool tryMfk32(nonces_t data, uint64_t *outputkey, bool verbose) {
 	uint32_t ar0_enc = data.ar;  // first encrypted reader response
 	uint32_t nr1_enc = data.nr2; // second encrypted reader challenge
 	uint32_t ar1_enc = data.ar2; // second encrypted reader response
-	bool isSuccess = FALSE;
+	bool isSuccess = false;
 	uint8_t counter = 0;
 	
 	clock_t t1 = clock();
@@ -241,11 +244,11 @@ bool tryMfk32_moebius(nonces_t data, uint64_t *outputkey, bool verbose) {
 	uint32_t nt0     = data.nonce;  // first tag challenge (nonce)
 	uint32_t nr0_enc = data.nr;  // first encrypted reader challenge
 	uint32_t ar0_enc = data.ar; // first encrypted reader response
-	//uint32_t uid1    = le32toh(data+16);
+	//uint32_t uid1    = LE32TOH(data+16);
 	uint32_t nt1     = data.nonce2; // second tag challenge (nonce)
 	uint32_t nr1_enc = data.nr2; // second encrypted reader challenge
 	uint32_t ar1_enc = data.ar2; // second encrypted reader response	
-	bool isSuccess = FALSE;
+	bool isSuccess = false;
 	int counter = 0;
 
 	clock_t t1 = clock();
@@ -293,12 +296,13 @@ bool tryMfk32_moebius(nonces_t data, uint64_t *outputkey, bool verbose) {
 	return isSuccess;
 }
 
+// 64 bit recover key from a full authentication. (sniffed)
 int tryMfk64_ex(uint8_t *data, uint64_t *outputkey){
-	uint32_t uid    = le32toh(data);
-	uint32_t nt     = le32toh(data+4);  // tag challenge
-	uint32_t nr_enc = le32toh(data+8);  // encrypted reader challenge
-	uint32_t ar_enc = le32toh(data+12); // encrypted reader response	
-	uint32_t at_enc = le32toh(data+16);	// encrypted tag response
+	uint32_t uid    = LE32TOH(data);
+	uint32_t nt     = LE32TOH(data+4);  // tag challenge
+	uint32_t nr_enc = LE32TOH(data+8);  // encrypted reader challenge
+	uint32_t ar_enc = LE32TOH(data+12); // encrypted reader response	
+	uint32_t at_enc = LE32TOH(data+16);	// encrypted tag response
 	return tryMfk64(uid, nt, nr_enc, ar_enc, at_enc, outputkey);
 }
 

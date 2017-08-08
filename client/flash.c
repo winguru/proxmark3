@@ -8,16 +8,7 @@
 // ELF file flasher
 //-----------------------------------------------------------------------------
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include "proxmark3.h"
-#include "sleep.h"
 #include "flash.h"
-#include "elf.h"
-#include "proxendian.h"
-#include "usb_cmd.h"
-#include "at91sam7s512.h"
 
 void SendCommand(UsbCommand* txcmd);
 void ReceiveCommand(UsbCommand* rxcmd);
@@ -345,7 +336,7 @@ static int enter_bootloader(char *serial_port_name)
 
 		fprintf(stderr,"Waiting for Proxmark to reappear on %s",serial_port_name);
 		do {
-			sleep(1);
+			msleep(1000);
 			fprintf(stderr, ".");
 		} while (!OpenProxmark(0));
 		fprintf(stderr," Found.\n");

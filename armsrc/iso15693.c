@@ -408,8 +408,7 @@ static int GetIso15693AnswerFromTag(uint8_t *receivedResponse, int maxLen, int *
 
 
 // Now the GetISO15693 message from sniffing command
-static int GetIso15693AnswerFromSniff(uint8_t *receivedResponse, int maxLen, int *samples, int *elapsed)
-{
+static int GetIso15693AnswerFromSniff(uint8_t *receivedResponse, int maxLen, int *samples, int *elapsed) {
 	uint8_t *dest = BigBuf_get_addr();
 
 	int c = 0, getNext = false;
@@ -987,10 +986,7 @@ void ReaderIso15693(uint32_t parameter)
 		} 
 	}
 
-	LED_A_OFF();
-	LED_B_OFF();
-	LED_C_OFF();
-	LED_D_OFF();
+	LEDsoff();
 }
 
 // Simulate an ISO15693 TAG, perform anti-collision and then print any reader commands
@@ -998,16 +994,15 @@ void ReaderIso15693(uint32_t parameter)
 void SimTagIso15693(uint32_t parameter, uint8_t *uid)
 {
 	LED_A_ON();
-	LED_B_ON();
-	LED_C_OFF();
-	LED_D_OFF();
 
-	int answerLen1 = 0;
+	int ans = 0;
 	int samples = 0;
 	int tsamples = 0;
 	int wait = 0;
 	int elapsed = 0;
 
+	Dbprintf("iso15963 Simulating uid: %x %x %x %x %x %x %x %x", uid[0], uid[1], uid[2], uid[3], uid[4], uid[5], uid[6], uid[7]);
+	
 	FpgaDownloadAndGo(FPGA_BITSTREAM_HF);
 
 	uint8_t *buf = BigBuf_malloc(100);
@@ -1020,43 +1015,35 @@ void SimTagIso15693(uint32_t parameter, uint8_t *uid)
     FpgaWriteConfWord(FPGA_MAJOR_MODE_OFF);
 	SpinDelay(200);
 
-	LED_A_OFF();
-	LED_B_OFF();
 	LED_C_ON();
-	LED_D_OFF();
 
-	// Listen to reader
-	answerLen1 = GetIso15693AnswerFromSniff(buf, 100, &samples, &elapsed) ;
-
-	if (answerLen1 >=1) // we should do a better check than this
-	{
-		// Build a suitable reponse to the reader INVENTORY cocmmand
-		// not so obsvious, but in the call to BuildInventoryResponse,  the command is copied to the global ToSend buffer used below.
-		
-		BuildInventoryResponse(uid);
+	// Build a suitable reponse to the reader INVENTORY cocmmand
+	// not so obsvious, but in the call to BuildInventoryResponse,  the command is copied to the global ToSend buffer used below.			
+	BuildInventoryResponse(uid);
 	
-		TransmitTo15693Reader(ToSend,ToSendMax, &tsamples, &wait);
+	while(!BUTTON_PRESS() && !usb_poll_validate_length() ) {
+		WDT_HIT();
+	
+		// Listen to reader
+		ans = GetIso15693AnswerFromSniff(buf, 100, &samples, &elapsed) ;
+
+		// we should do a better check than this
+		if (ans >=1 ) {
+			TransmitTo15693Reader(ToSend, ToSendMax, &tsamples, &wait);
+			
+			Dbprintf("%d octets read from reader command: %x %x %x %x %x %x %x %x %x", ans,
+			buf[0], buf[1], buf[2],	buf[3],
+			buf[4], buf[5],	buf[6], buf[7], buf[8]);
+		}
 	}
-
-	Dbprintf("%d octets read from reader command: %x %x %x %x %x %x %x %x %x", answerLen1,
-		buf[0], buf[1], buf[2],	buf[3],
-		buf[4], buf[5],	buf[6], buf[7], buf[8]);
-
-	Dbprintf("Simulationg uid: %x %x %x %x %x %x %x %x",
-		uid[0], uid[1], uid[2],	uid[3],
-		uid[4], uid[5],	uid[6], uid[7]);
-
-	LED_A_OFF();
-	LED_B_OFF();
-	LED_C_OFF();
-	LED_D_OFF();
+	LEDsoff();
+    FpgaWriteConfWord(FPGA_MAJOR_MODE_OFF);	
 }
 
 
 // Since there is no standardized way of reading the AFI out of a tag, we will brute force it
 // (some manufactures offer a way to read the AFI, though)
-void BruteforceIso15693Afi(uint32_t speed) 
-{	
+void BruteforceIso15693Afi(uint32_t speed) {	
 	uint8_t data[20];
 	uint8_t *recv = data;
 	int datalen = 0, recvlen = 0;
