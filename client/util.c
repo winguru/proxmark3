@@ -182,8 +182,7 @@ char *sprint_bin_break(const uint8_t *data, const size_t len, const uint8_t brea
 		}
 		in_index++;
 	}
-	// last char.
-	sprintf(tmp++, "%u", data[in_index]);
+
 	return buf;
 }
 /*
@@ -261,6 +260,18 @@ char *sprint_ascii(const uint8_t *data, const size_t len) {
 		++i;
 	}
 	return buf;
+}
+
+void print_blocks(uint32_t *data, size_t len) {
+	PrintAndLog("Blk | Data ");
+	PrintAndLog("----+------------");
+
+	if ( !data ) {
+		PrintAndLog("..empty data");
+	} else {
+		for (uint8_t i=0; i<len; i++)
+			PrintAndLog(" %02d | 0x%08X", i, data[i]);
+	}
 }
 
 void num_to_bytes(uint64_t n, size_t len, uint8_t* dest) {
@@ -491,7 +502,6 @@ int param_getstr(const char *line, int paramnum, char * str)
 The following methods comes from Rfidler sourcecode.
 https://github.com/ApertureLabsLtd/RFIDler/blob/master/firmware/Pic32/RFIDler.X/src/
 */
-
 // convert hex to sequence of 0/1 bit values
 // returns number of bits converted
 int hextobinarray(char *target, char *source)

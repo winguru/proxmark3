@@ -397,6 +397,7 @@ void WriteTItag(uint32_t idhi, uint32_t idlo, uint16_t crc)
 
 void SimulateTagLowFrequency(int period, int gap, int ledcontrol)
 {
+	#define BREAK_OUT_LIMIT 	
 	int i = 0;
 	uint8_t *buf = BigBuf_get_addr();
 
@@ -419,8 +420,8 @@ void SimulateTagLowFrequency(int period, int gap, int ledcontrol)
 	AT91C_BASE_PIOA->PIO_OER = GPIO_SSC_DOUT;
 	AT91C_BASE_PIOA->PIO_ODR = GPIO_SSC_CLK;
 
+	
 	for(;;) {
-		WDT_HIT();
 
 		if (ledcontrol) LED_D_ON();
 				
@@ -440,7 +441,8 @@ void SimulateTagLowFrequency(int period, int gap, int ledcontrol)
 		//wait until SSC_CLK goes LOW
 		while(AT91C_BASE_PIOA->PIO_PDSR & GPIO_SSC_CLK) {
 			WDT_HIT();
-			if ( usb_poll_validate_length() || BUTTON_PRESS() )
+			//if ( usb_poll_validate_length() || BUTTON_PRESS() )
+			if ( BUTTON_PRESS() )
 				goto OUT;
 		}
 				
@@ -448,7 +450,6 @@ void SimulateTagLowFrequency(int period, int gap, int ledcontrol)
 		if(i == period) {
 			i = 0;
 			if (gap) {
-				WDT_HIT();
 				SHORT_COIL();
 				SpinDelayUs(gap);
 			}
@@ -548,8 +549,13 @@ static void fcAll(uint8_t fc, int *n, uint8_t clock, uint16_t *modCnt)
 
 // prepare a waveform pattern in the buffer based on the ID given then
 // simulate a HID tag until the button is pressed
-void CmdHIDsimTAG(int hi, int lo, int ledcontrol)
-{
+void CmdHIDsimTAG(int hi, int lo, int ledcontrol) {
+
+	if (hi > 0xFFF) {
+		DbpString("Tags can only have 44 bits. - USE lf simfsk for larger tags");
+		return;
+	}
+	
 	FpgaDownloadAndGo(FPGA_BITSTREAM_LF);
 	set_tracing(false);
 		
@@ -564,11 +570,7 @@ void CmdHIDsimTAG(int hi, int lo, int ledcontrol)
 	 nor 1 bits, they are special patterns (a = set of 12 fc8 and b = set of 10 fc10)
 	*/
 
-	if (hi > 0xFFF) {
-		DbpString("Tags can only have 44 bits. - USE lf simfsk for larger tags");
-		return;
-	}
-	fc(0,&n);
+	fc(0, &n);
 	// special start of frame marker containing invalid bit sequences
 	fc(8,  &n);	fc(8,  &n); // invalid
 	fc(8,  &n);	fc(10, &n); // logical 0
@@ -578,8 +580,10 @@ void CmdHIDsimTAG(int hi, int lo, int ledcontrol)
 	WDT_HIT();
 	// manchester encode bits 43 to 32
 	for (i=11; i>=0; i--) {
-		if ((i%4)==3) fc(0,&n);
-		if ((hi>>i)&1) {
+		
+		if ((i%4)==3) fc(0, &n);
+		
+		if ((hi>>i) & 1) {
 			fc(10, &n); fc(8,  &n);		// low-high transition
 		} else {
 			fc(8,  &n); fc(10, &n);		// high-low transition
@@ -589,8 +593,10 @@ void CmdHIDsimTAG(int hi, int lo, int ledcontrol)
 	WDT_HIT();
 	// manchester encode bits 31 to 0
 	for (i=31; i>=0; i--) {
-		if ((i%4)==3) fc(0,&n);
-		if ((lo>>i)&1) {
+		
+		if ((i%4)==3) fc(0, &n);
+		
+		if ((lo>>i) & 1) {
 			fc(10, &n); fc(8,  &n);		// low-high transition
 		} else {
 			fc(8,  &n); fc(10, &n);		// high-low transition
@@ -606,7 +612,7 @@ void CmdHIDsimTAG(int hi, int lo, int ledcontrol)
 // prepare a waveform pattern in the buffer based on the ID given then
 // simulate a FSK tag until the button is pressed
 // arg1 contains fcHigh and fcLow, arg2 contains invert and clock
-void CmdFSKsimTAG(uint16_t arg1, uint16_t arg2, size_t size, uint8_t *BitStream)
+void CmdFSKsimTAG(uint16_t arg1, uint16_t arg2, size_t size, uint8_t *bits)
 {
 	FpgaDownloadAndGo(FPGA_BITSTREAM_LF);
 
@@ -624,7 +630,7 @@ void CmdFSKsimTAG(uint16_t arg1, uint16_t arg2, size_t size, uint8_t *BitStream)
 
 	for (i=0; i<size; i++){
 		
-		if (BitStream[i] == invert)
+		if (bits[i] == invert)
 			fcAll(fcLow, &n, clk, &modCnt);
 		else
 			fcAll(fcHigh, &n, clk, &modCnt);
@@ -795,10 +801,11 @@ void CmdHIDdemodFSK(int findone, int *high, int *low, int ledcontrol)
 		WDT_HIT();
 		if (ledcontrol) LED_A_ON();
 
-		DoAcquisition_default(-1,true);
+		DoAcquisition_default(-1, true);
 		// FSK demodulator
 		size = 50*128*2; //big enough to catch 2 sequences of largest format
 		idx = HIDdemodFSK(dest, &size, &hi2, &hi, &lo, &dummyIdx);
+		if ( idx < 0 ) continue;
 		
 		if (idx>0 && lo>0 && (size==96 || size==192)){
 			// go over previously decoded manchester data and decode into usable tag ID
@@ -868,7 +875,6 @@ void CmdHIDdemodFSK(int findone, int *high, int *low, int ledcontrol)
 			// reset
 		}
 		hi2 = hi = lo = idx = 0;
-		WDT_HIT();
 	}
 	FpgaWriteConfWord(FPGA_MAJOR_MODE_OFF);
 	DbpString("Stopped");
@@ -1053,7 +1059,7 @@ void CmdIOdemodFSK(int findone, int *high, int *low, int ledcontrol)
 		//fskdemod and get start index
 		WDT_HIT();
 		idx = detectIOProx(dest, &size, &dummyIdx);
-		if (idx<0) continue;
+		if (idx < 0) continue;
 			//valid tag found
 
 			//Index map

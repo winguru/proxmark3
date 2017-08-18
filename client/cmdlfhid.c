@@ -53,7 +53,7 @@ int usage_lf_hid_sim(void){
 	PrintAndLog("       h	- This help");
 	PrintAndLog("       ID  - HID id");
 	PrintAndLog("Samples:");
-	PrintAndLog("      lf hid sim 224");
+	PrintAndLog("      lf hid sim 2006ec0c86");
 	return 0;
 }
 int usage_lf_hid_clone(void){
@@ -65,8 +65,8 @@ int usage_lf_hid_clone(void){
 	PrintAndLog("       ID  - HID id");
 	PrintAndLog("       L   - 84bit ID");
 	PrintAndLog("Samples:");
-	PrintAndLog("      lf hid clone 224");
-	PrintAndLog("      lf hid clone 224 L");
+	PrintAndLog("      lf hid clone 2006ec0c86");
+	PrintAndLog("      lf hid clone 2006ec0c86 L");
 	return 0;
 }
 int usage_lf_hid_brute(void){
@@ -74,21 +74,23 @@ int usage_lf_hid_brute(void){
 	PrintAndLog("This is a attack against reader. if cardnumber is given, it starts with it and goes up / down one step");
 	PrintAndLog("if cardnumber is not given, it starts with 1 and goes up to 65535");
 	PrintAndLog("");
-	PrintAndLog("Usage:  lf hid brute [h] a <format> f <facility-code> c <cardnumber> d <delay>");
+	PrintAndLog("Usage:  lf hid brute [h] [v] a <format> f <facility-code> c <cardnumber> d <delay>");
 	PrintAndLog("Options :");
 	PrintAndLog("       h                 :  This help");	
 	PrintAndLog("       a <format>        :  26|33|34|35|37|40|44|84");
 	PrintAndLog("       f <facility-code> :  8-bit value HID facility code");
 	PrintAndLog("       c <cardnumber>    :  (optional) cardnumber to start with, max 65535");
 	PrintAndLog("       d <delay>         :  delay betweens attempts in ms. Default 1000ms");
+	PrintAndLog("       v                 :  verbose logging, show all tries");
 	PrintAndLog("");
 	PrintAndLog("Samples:");
 	PrintAndLog("       lf hid brute a 26 f 224");
 	PrintAndLog("       lf hid brute a 26 f 21 d 2000");
-	PrintAndLog("       lf hid brute a 26 f 21 c 200 d 2000");
+	PrintAndLog("       lf hid brute v a 26 f 21 c 200 d 2000");
 	return 0;
 }
 
+// sending three times.  Didn't seem to break the previous sim?
 static int sendPing(void){
 	UsbCommand ping = {CMD_PING, {1, 2, 3}};
 	SendCommand(&ping);
@@ -100,17 +102,20 @@ static int sendPing(void){
 		return 0;
 	return 1;
 }
-static bool sendTry(uint8_t fmtlen, uint32_t fc, uint32_t cn, uint32_t delay, uint8_t *bs){
+static bool sendTry(uint8_t fmtlen, uint32_t fc, uint32_t cn, uint32_t delay, uint8_t *bits, bool verbose){
 
-	PrintAndLog("Trying FC: %u; CN: %u", fc, cn);
+	// this should be optional.
+	if ( verbose )
+		PrintAndLog("Trying FC: %u; CN: %u", fc, cn);
 	
-	calcWiegand( fmtlen, fc, cn, bs);
+	calcWiegand( fmtlen, fc, cn, bits);
 
-	uint64_t arg1 = bytebits_to_byte(bs,32);
-	uint64_t arg2 = bytebits_to_byte(bs+32,32);
+	uint64_t arg1 = bytebits_to_byte(bits, 32);
+	uint64_t arg2 = bytebits_to_byte(bits + 32, 32);
 	UsbCommand c = {CMD_HID_SIM_TAG, {arg1, arg2, 0}}; 
 	clearCommandBuffer();
 	SendCommand(&c);
+
 	msleep(delay);
 	sendPing();
 	return true;
@@ -123,29 +128,36 @@ int CmdHIDDemod(const char *Cmd) {
 	//raw fsk demod no manchester decoding no start bit finding just get binary from wave
 	uint32_t hi2=0, hi=0, lo=0;
 
-	uint8_t BitStream[MAX_GRAPH_TRACE_LEN] = {0};
-	size_t BitLen = getFromGraphBuf(BitStream);
-	if (BitLen==0) return 0;
+	uint8_t bits[MAX_GRAPH_TRACE_LEN] = {0};
+	size_t size = getFromGraphBuf(bits);
+	if (size==0) {
+		PrintAndLog("DEBUG: Error - HID not enough samples");
+		return 0;
+	}
 	//get binary from fsk wave
 	int waveIdx = 0;
-	int idx = HIDdemodFSK(BitStream,&BitLen,&hi2,&hi,&lo, &waveIdx);
-
+	int idx = HIDdemodFSK(bits, &size, &hi2, &hi, &lo, &waveIdx);
 	if (idx < 0) {
 		if (g_debugMode){
 			if (idx==-1){
-				PrintAndLog("DEBUG: Error - HID just noise detected");
+				PrintAndLog("DEBUG: Error - HID not enough samples");
 			} else if (idx == -2) {
-				PrintAndLog("DEBUG: Error - HID problem during FSK demod");
+				PrintAndLog("DEBUG: Error - HID just noise detected");
 			} else if (idx == -3) {
-				PrintAndLog("DEBUG: Error - HID preamble not found");
+				PrintAndLog("DEBUG: Error - HID problem during FSK demod");
 			} else if (idx == -4) {
-				PrintAndLog("DEBUG: Error - HID error in Manchester data, SIZE: %d", BitLen);
+				PrintAndLog("DEBUG: Error - HID preamble not found");
+			} else if (idx == -5) {				
+				PrintAndLog("DEBUG: Error - HID error in Manchester data, size %d", size);
 			} else {
 				PrintAndLog("DEBUG: Error - HID error demoding fsk %d", idx);
 			}   
 		}
 		return 0;
 	}
+
+	setDemodBuf(bits, size, idx);
+	setClockGrid(50, waveIdx + (idx*50));
 	
 	if (hi2==0 && hi==0 && lo==0) {
 		if (g_debugMode) PrintAndLog("DEBUG: Error - HID no values found");
@@ -154,8 +166,7 @@ int CmdHIDDemod(const char *Cmd) {
 	
 	if (hi2 != 0){ //extra large HID tags
 		PrintAndLog("HID Prox TAG ID: %x%08x%08x (%u)", hi2, hi, lo, (lo>>1) & 0xFFFF);
-	}
-	else {  //standard HID tags <38 bits
+	} else {  //standard HID tags <38 bits
 		uint8_t fmtLen = 0;
 		uint32_t fc = 0;
 		uint32_t cardnum = 0;
@@ -194,11 +205,9 @@ int CmdHIDDemod(const char *Cmd) {
 		}
 		PrintAndLog("HID Prox TAG ID: %x%08x (%u) - Format Len: %ubit - FC: %u - Card: %u", hi, lo, (lo>>1) & 0xFFFF, fmtLen, fc, cardnum);
 	}
-	setDemodBuf(BitStream,BitLen,idx);
-	setClockGrid(50, waveIdx + (idx*50));
 
 	if (g_debugMode){ 
-		PrintAndLog("DEBUG: HID idx: %d, Len: %d, Printing Demod Buffer:", idx, BitLen);
+		PrintAndLog("DEBUG: HID idx: %d, Len: %d, Printing Demod Buffer:", idx, size);
 		printDemodBuff();
 	}
 	return 1;
@@ -267,9 +276,7 @@ int CmdHIDClone(const char *Cmd) {
 			hi = (hi << 4) | (lo >> 28);
 			lo = (lo << 4) | (n & 0xf);
 		}
-
 		PrintAndLog("Cloning tag with ID %x%08x", hi, lo);
-
 		hi2 = 0;
 		c.d.asBytes[0] = 0;
 	}
@@ -470,12 +477,11 @@ int CmdHIDWiegand(const char *Cmd) {
 
 int CmdHIDBrute(const char *Cmd){
 	
-	bool errors = false;
+	bool errors = false, verbose = false;
 	uint32_t fc = 0, cn = 0, delay = 1000;
 	uint8_t fmtlen = 0;
 	uint8_t bits[96];
-	uint8_t *bs = bits;
-	memset(bs, 0, sizeof(bits));
+	memset(bits, 0, sizeof(bits));
 	uint8_t cmdp = 0;
 		
 	while(param_getchar(Cmd, cmdp) != 0x00 && !errors) {
@@ -505,10 +511,10 @@ int CmdHIDBrute(const char *Cmd){
 			break;
 		case 'a':
 		case 'A':
-			fmtlen = param_get8(Cmd, cmdp+1);			
+			fmtlen = param_get8(Cmd, cmdp+1);
 			cmdp += 2;
 			bool is_ftm_ok = false;
-			uint8_t ftms[] = {26,33,34,35,37};
+			uint8_t ftms[] = {26, 33, 34, 35, 37};
 			for ( uint8_t i = 0; i < sizeof(ftms); i++){
 				if ( ftms[i] == fmtlen ) {
 					is_ftm_ok = true;
@@ -516,6 +522,11 @@ int CmdHIDBrute(const char *Cmd){
 			}
 			// negated
 			errors = !is_ftm_ok;
+			break;
+		case 'v':		
+		case 'V':
+			verbose = true;
+			cmdp++;
 			break;
 		default:
 			PrintAndLog("Unknown parameter '%c'", param_getchar(Cmd, cmdp));
@@ -532,6 +543,7 @@ int CmdHIDBrute(const char *Cmd){
 	uint16_t up = cn;
 	uint16_t down = cn;
 	
+	// main loop
 	for (;;){
 		
 		if ( offline ) {
@@ -547,24 +559,24 @@ int CmdHIDBrute(const char *Cmd){
 		
 		// Do one up
 		if ( up < 0xFFFF )
-			if ( !sendTry(fmtlen, fc, up++, delay, bs)) return 1;
+			if ( !sendTry(fmtlen, fc, up++, delay, bits, verbose)) return 1;
 		
 		// Do one down  (if cardnumber is given)
 		if ( cn > 1 )
 			if ( down > 1 )
-				if ( !sendTry(fmtlen, fc, --down, delay, bs)) return 1;
+				if ( !sendTry(fmtlen, fc, --down, delay, bits, verbose)) return 1;
 	}
 	return 0;
 }
 
 static command_t CommandTable[] = {
-	{"help",	CmdHelp,        1, "This help"},
-	{"demod",	CmdHIDDemod,	0, "Demodulate HID Prox tag from the GraphBuffer"},
-	{"read",	CmdHIDRead,		0, "Attempt to read and extract tag data"},
-	{"sim",		CmdHIDSim,		0, "HID tag simulator"},
-	{"clone",	CmdHIDClone,	0, "Clone HID to T55x7"},
-	{"wiegand",	CmdHIDWiegand,	1, "Convert facility code/card number to Wiegand code"},
-	{"brute",	CmdHIDBrute,	0, "Bruteforce card number against reader"},
+	{"help",	CmdHelp,        1, "this help"},
+	{"demod",	CmdHIDDemod,	0, "demodulate HID Prox tag from the GraphBuffer"},
+	{"read",	CmdHIDRead,		0, "attempt to read and extract tag data"},
+	{"clone",	CmdHIDClone,	0, "clone HID to T55x7"},
+	{"sim",		CmdHIDSim,		0, "simulate HID tag"},
+	{"wiegand",	CmdHIDWiegand,	1, "convert facility code/card number to Wiegand code"},
+	{"brute",	CmdHIDBrute,	0, "bruteforce card number against reader"},
 	{NULL, NULL, 0, NULL}
 };
 

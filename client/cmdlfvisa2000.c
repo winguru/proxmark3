@@ -17,13 +17,13 @@ static int CmdHelp(const char *Cmd);
 
 int usage_lf_visa2k_clone(void){
 	PrintAndLog("clone a Visa2000 tag to a T55x7 tag.");
-	PrintAndLog("Usage: lf visa2k clone [h] <card ID> <Q5>");
+	PrintAndLog("Usage: lf visa2000 clone [h] <card ID> <Q5>");
 	PrintAndLog("Options:");
 	PrintAndLog("      h          : This help");
 	PrintAndLog("      <card ID>  : Visa2k card ID");
 	PrintAndLog("      <Q5>       : specify write to Q5 (t5555 instead of t55x7)");
 	PrintAndLog("");
-	PrintAndLog("Sample: lf visa2k clone 112233");
+	PrintAndLog("Sample: lf visa2000 clone 112233");
 	return 0;
 }
 
@@ -31,12 +31,12 @@ int usage_lf_visa2k_sim(void) {
 	PrintAndLog("Enables simulation of visa2k card with specified card number.");
 	PrintAndLog("Simulation runs until the button is pressed or another USB command is issued.");
 	PrintAndLog("");
-	PrintAndLog("Usage:  lf visa2k sim [h] <card ID>");
+	PrintAndLog("Usage:  lf visa2000 sim [h] <card ID>");
 	PrintAndLog("Options:");
 	PrintAndLog("      h          : This help");
 	PrintAndLog("      <card ID>  : Visa2k card ID");
 	PrintAndLog("");
-	PrintAndLog("Sample: lf visa2k sim 112233");
+	PrintAndLog("Sample: lf visa2000 sim 112233");
 	return 0;
 }
 
@@ -177,15 +177,12 @@ int CmdVisa2kClone(const char *Cmd) {
 	blocks[3] =  (visa_parity(id) << 4) | visa_chksum(id);	
 
 	PrintAndLog("Preparing to clone Visa2000 to T55x7 with CardId: %u", id);
-	PrintAndLog("Blk | Data ");
-	PrintAndLog("----+------------");
-	for(int i = 0; i<4; ++i)
-		PrintAndLog(" %02d | 0x%08x", i , blocks[i]);
+	print_blocks(blocks, 4);
 	
 	UsbCommand resp;
 	UsbCommand c = {CMD_T55XX_WRITE_BLOCK, {0,0,0}};
 
-	for (int i = 3; i >= 0; --i) {
+	for (uint8_t i = 0; i < 4; i++) {
 		c.arg[0] = blocks[i];
 		c.arg[1] = i;
 		clearCommandBuffer();
@@ -228,10 +225,10 @@ int CmdVisa2kSim(const char *Cmd) {
 
 static command_t CommandTable[] = {
     {"help",	CmdHelp,		1, "This help"},
-	{"demod",	CmdVisa2kDemod,	1, "Demodulate an VISA2000 tag from the GraphBuffer"},	
-	{"read",	CmdVisa2kRead,	0, "Attempt to read and extract tag data from the antenna"},
-	{"sim",		CmdVisa2kSim,	0, "Visa2000 tag simulator"},
+	{"demod",	CmdVisa2kDemod,	1, "demodulate an VISA2000 tag from the GraphBuffer"},	
+	{"read",	CmdVisa2kRead,	0, "attempt to read and extract tag data from the antenna"},
 	{"clone",	CmdVisa2kClone,	0, "clone Visa2000 to t55x7"},
+	{"sim",		CmdVisa2kSim,	0, "simulate Visa2000 tag"},
     {NULL, NULL, 0, NULL}
 };
 

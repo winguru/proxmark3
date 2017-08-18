@@ -12,8 +12,9 @@ static int CmdHelp(const char *Cmd);
 
 int usage_lf_presco_clone(void){
 	PrintAndLog("clone a Presco tag to a T55x7 tag.");
-	PrintAndLog("Usage: lf presco clone d <Card-ID> H <hex-ID> <Q5>");
+	PrintAndLog("Usage: lf presco clone [h] d <Card-ID> H <hex-ID> <Q5>");
 	PrintAndLog("Options :");
+	PrintAndLog("  h             : this help");	
 	PrintAndLog("  d <Card-ID>   : 9 digit presco card ID");
 	PrintAndLog("  H <hex-ID>    : 8 digit hex card number");
 	PrintAndLog("  <Q5>          : specify write to Q5 (t5555 instead of t55x7)");
@@ -27,8 +28,9 @@ int usage_lf_presco_sim(void) {
 	PrintAndLog("Simulation runs until the button is pressed or another USB command is issued.");
 	PrintAndLog("Per presco format, the card number is 9 digit number and can contain *# chars. Larger values are truncated.");
 	PrintAndLog("");
-	PrintAndLog("Usage:  lf presco sim d <Card-ID> or H <hex-ID>");
+	PrintAndLog("Usage:  lf presco sim [h] d <Card-ID> or H <hex-ID>");
 	PrintAndLog("Options :");
+	PrintAndLog("  h             : this help");	
 	PrintAndLog("  d <Card-ID>   : 9 digit presco card number");
 	PrintAndLog("  H <hex-ID>    : 8 digit hex card number");
 	PrintAndLog("");
@@ -199,18 +201,12 @@ int CmdPrescoClone(const char *Cmd) {
 	blocks[4] = fullcode;
 
 	PrintAndLog("Preparing to clone Presco to T55x7 with SiteCode: %u, UserCode: %u, FullCode: %08x", sitecode, usercode, fullcode);
-	PrintAndLog("Blk | Data ");
-	PrintAndLog("----+------------");
-	PrintAndLog(" 00 | 0x%08x", blocks[0]);
-	PrintAndLog(" 01 | 0x%08x", blocks[1]);
-	PrintAndLog(" 02 | 0x%08x", blocks[2]);
-	PrintAndLog(" 03 | 0x%08x", blocks[3]);	
-	PrintAndLog(" 04 | 0x%08x", blocks[4]);	
+	print_blocks(blocks, 5);
 	
 	UsbCommand resp;
 	UsbCommand c = {CMD_T55XX_WRITE_BLOCK, {0,0,0}};
 
-	for (int i=4; i>=0; i--) {
+	for (uint8_t i=0; i<5; i++) {
 		c.arg[0] = blocks[i];
 		c.arg[1] = i;
 		clearCommandBuffer();
@@ -249,8 +245,8 @@ int CmdPrescoSim(const char *Cmd) {
 static command_t CommandTable[] = {
     {"help",	CmdHelp,		1, "This help"},
 	{"read",	CmdPrescoRead,  0, "Attempt to read and Extract tag data"},
-	{"clone",	CmdPrescoClone, 0, "d <9 digit ID> or h <hex> [Q5] clone presco tag"},
-	{"sim",		CmdPrescoSim,   0, "d <9 digit ID> or h <hex> simulate presco tag"},
+	{"clone",	CmdPrescoClone, 0, "clone presco tag"},
+	{"sim",		CmdPrescoSim,   0, "simulate presco tag"},
     {NULL, NULL, 0, NULL}
 };
 

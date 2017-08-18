@@ -43,7 +43,7 @@ int usage_lf_awid_sim(void) {
 	PrintAndLog("");
 	PrintAndLog("Samples:");
 	PrintAndLog("       lf awid sim 26 224 1337");
-	PrintAndLog("       lf awid sim 50 2001 13371337");
+	PrintAndLog("       lf awid sim 50 2001 deadc0de");
 	return 0;
 }
 
@@ -70,18 +70,19 @@ int usage_lf_awid_brute(void){
 	PrintAndLog("This is a attack against reader. if cardnumber is given, it starts with it and goes up / down one step");
 	PrintAndLog("if cardnumber is not given, it starts with 1 and goes up to 65535");
 	PrintAndLog("");
-	PrintAndLog("Usage:  lf awid brute [h] a <format> f <facility-code> c <cardnumber> d <delay>");
+	PrintAndLog("Usage:  lf awid brute [h] [v] a <format> f <facility-code> c <cardnumber> d <delay>");
 	PrintAndLog("Options:");
 	PrintAndLog("       h                 :  This help");
 	PrintAndLog("       a <format>        :  format length 26|50");
 	PrintAndLog("       f <facility-code> :  8|16bit value facility code");
 	PrintAndLog("       c <cardnumber>    :  (optional) cardnumber to start with, max 65535");
 	PrintAndLog("       d <delay>         :  delay betweens attempts in ms. Default 1000ms");
+	PrintAndLog("       v                 :  verbose logging, show all tries");	
 	PrintAndLog("");
 	PrintAndLog("Samples:");
 	PrintAndLog("       lf awid brute a 26 f 224");
 	PrintAndLog("       lf awid brute a 50 f 2001 d 2000");
-	PrintAndLog("       lf awid brute a 50 f 2001 c 200 d 2000");
+	PrintAndLog("       lf awid brute v a 50 f 2001 c 200 d 2000");
 	return 0;
 }
 
@@ -97,20 +98,25 @@ static int sendPing(void){
 	return 1;
 }
 
-static bool sendTry(uint8_t fmtlen, uint32_t fc, uint32_t cn, uint32_t delay, uint8_t *bs, size_t bs_len){
-
-	PrintAndLog("Trying FC: %u; CN: %u", fc, cn);		
-	if ( !getAWIDBits(fmtlen, fc, cn, bs)) {
+static bool sendTry(uint8_t fmtlen, uint32_t fc, uint32_t cn, uint32_t delay, uint8_t *bits, size_t bs_len, bool verbose){
+	
+	if ( verbose )
+		PrintAndLog("Trying FC: %u; CN: %u", fc, cn);		
+	
+	if ( !getAWIDBits(fmtlen, fc, cn, bits)) {
 		PrintAndLog("Error with tag bitstream generation.");
 		return false;
 	}
 
-	uint64_t arg1 = (10<<8) + 8; // fcHigh = 10, fcLow = 8
-	uint64_t arg2 = 50; 		 // clk RF/50 invert=0
+	uint8_t clk = 50, high = 10, low = 8, invert = 1;
+	uint64_t arg1 = (high << 8) + low;
+	uint64_t arg2 = (invert << 8) + clk;
+
 	UsbCommand c = {CMD_FSK_SIM_TAG, {arg1, arg2, bs_len}};
-	memcpy(c.d.asBytes, bs, bs_len);
+	memcpy(c.d.asBytes, bits, bs_len);
 	clearCommandBuffer();
 	SendCommand(&c);
+	
 	msleep(delay);
 	sendPing();
 	return true;
@@ -164,6 +170,9 @@ int getAWIDBits(uint8_t fmtlen, uint32_t fc, uint32_t cn, uint8_t *bits) {
 	size_t bitLen = addParity(pre, bits+8, 66, 4, 1);
 
 	if (bitLen != 88) return 0;
+	
+	printf("awid raw bits:\n %s \n", sprint_bin(bits, bitLen));
+	
 	return 1;
 }
 
@@ -228,7 +237,7 @@ int CmdAWIDRead_device(const char *Cmd) {
 }
 
 //by marshmellow
-//AWID Prox demod - FSK RF/50 with preamble of 00000001  (always a 96 bit data stream)
+//AWID Prox demod - FSK2a RF/50 with preamble of 00000001  (always a 96 bit data stream)
 //print full AWID Prox ID and some bit format details if found
 int CmdAWIDDemod(const char *Cmd) {
 	uint8_t bits[MAX_GRAPH_TRACE_LEN]={0};
@@ -239,7 +248,6 @@ int CmdAWIDDemod(const char *Cmd) {
 	}
 	//get binary from fsk wave
 	int waveIdx = 0;
-
 	int idx = detectAWID(bits, &size, &waveIdx);
 	if (idx <= 0){
 		if (g_debugMode){
@@ -252,12 +260,16 @@ int CmdAWIDDemod(const char *Cmd) {
 			else if (idx == -4)
 				PrintAndLog("DEBUG: Error - AWID preamble not found");
 			else if (idx == -5)
-				PrintAndLog("DEBUG: Error - AWID size not correct: %d", size);
+				PrintAndLog("DEBUG: Error - AWID size not correct, size %d", size);
 			else
-				PrintAndLog("DEBUG: Error - AWID error %d",idx);
+				PrintAndLog("DEBUG: Error - AWID error demoding fsk %d",idx);
 		}
 		return 0;
 	}
+
+	setDemodBuf(bits, size, idx);
+	setClockGrid(50, waveIdx + (idx*50));
+
 
 	// Index map
 	// 0            10            20            30              40            50              60
@@ -276,7 +288,6 @@ int CmdAWIDDemod(const char *Cmd) {
 	uint32_t rawLo = bytebits_to_byte(bits + idx + 64, 32);
 	uint32_t rawHi = bytebits_to_byte(bits + idx + 32, 32);
 	uint32_t rawHi2 = bytebits_to_byte(bits + idx, 32);
-	setDemodBuf(bits, 96, idx);
 
 	size = removeParity(bits, idx+8, 4, 1, 88);
 	if (size != 66){
@@ -352,7 +363,7 @@ int CmdAWIDDemod(const char *Cmd) {
 	}
 
 	if (g_debugMode){
-		PrintAndLog("DEBUG: AWID idx: %d, Len: %d Printing Demod Buffer:", idx, 96);
+		PrintAndLog("DEBUG: AWID idx: %d, Len: %d Printing Demod Buffer:", idx, size);
 		printDemodBuff();
 	}
 	return 1;
@@ -362,13 +373,9 @@ int CmdAWIDSim(const char *Cmd) {
 	uint32_t fc = 0, cn = 0;
 	uint8_t fmtlen = 0;
 	uint8_t bits[96];
-	uint8_t *bs = bits;
 	size_t size = sizeof(bits);
-	memset(bs, 0x00, size);
+	memset(bits, 0x00, size);
 
-	uint64_t arg1 = ( 10 << 8 ) + 8; // fcHigh = 10, fcLow = 8
-	uint64_t arg2 = 50; // clk RF/50 invert=0
-  
 	char cmdp = param_getchar(Cmd, 0);
 	if (strlen(Cmd) == 0 || cmdp == 'h' || cmdp == 'H') return usage_lf_awid_sim();
 	
@@ -382,16 +389,21 @@ int CmdAWIDSim(const char *Cmd) {
 	PrintAndLog("Emulating AWID %u -- FC: %u; CN: %u\n", fmtlen, fc, cn);
 	PrintAndLog("Press pm3-button to abort simulation or run another command");
 	
-	if (!getAWIDBits(fmtlen, fc, cn, bs)) {
+	if (!getAWIDBits(fmtlen, fc, cn, bits)) {
 		PrintAndLog("Error with tag bitstream generation.");
 		return 1;
 	}
-	// AWID uses: fcHigh: 10, fcLow: 8, clk: 50, invert: 0
+	
+	uint8_t clk = 50, high = 10, low = 8, invert = 1;
+	uint64_t arg1 = (high << 8) + low;
+	uint64_t arg2 = (invert << 8) + clk;
+
+	// AWID uses: FSK2a fcHigh: 10, fcLow: 8, clk: 50, invert: 1
 	// arg1 --- fcHigh<<8 + fcLow
 	// arg2 --- Inversion and clk setting
 	// 96   --- Bitstream length: 96-bits == 12 bytes
 	UsbCommand c = {CMD_FSK_SIM_TAG, {arg1, arg2, size}};  
-	memcpy(c.d.asBytes, bs, size);
+	memcpy(c.d.asBytes, bits, size);
 	clearCommandBuffer();
 	SendCommand(&c);
 	return 0;
@@ -425,17 +437,12 @@ int CmdAWIDClone(const char *Cmd) {
 		return 1;
 	}	
 
-	blocks[1] = bytebits_to_byte(bs,32);
-	blocks[2] = bytebits_to_byte(bs+32,32);
-	blocks[3] = bytebits_to_byte(bs+64,32);
+	blocks[1] = bytebits_to_byte(bs, 32);
+	blocks[2] = bytebits_to_byte(bs + 32, 32);
+	blocks[3] = bytebits_to_byte(bs + 64, 32);
 
 	PrintAndLog("Preparing to clone AWID %u to T55x7 with FC: %u, CN: %u", fmtlen, fc, cn);
-	PrintAndLog("Blk | Data ");
-	PrintAndLog("----+------------");
-	PrintAndLog(" 00 | 0x%08x", blocks[0]);
-	PrintAndLog(" 01 | 0x%08x", blocks[1]);
-	PrintAndLog(" 02 | 0x%08x", blocks[2]);
-	PrintAndLog(" 03 | 0x%08x", blocks[3]);	
+	print_blocks(blocks, 4);
 	
 	UsbCommand resp;
 	UsbCommand c = {CMD_T55XX_WRITE_BLOCK, {0,0,0}};
@@ -455,13 +462,12 @@ int CmdAWIDClone(const char *Cmd) {
 
 int CmdAWIDBrute(const char *Cmd) {
 	
-	bool errors = false;
+	bool errors = false, verbose = false;
 	uint32_t fc = 0, cn = 0, delay = 1000;
 	uint8_t fmtlen = 0;
 	uint8_t bits[96];
-	uint8_t *bs = bits;
 	size_t size = sizeof(bits);
-	memset(bs, 0x00, size);
+	memset(bits, 0x00, size);
 	uint8_t cmdp = 0;
 	
 	while(param_getchar(Cmd, cmdp) != 0x00 && !errors) {
@@ -494,6 +500,11 @@ int CmdAWIDBrute(const char *Cmd) {
 			fmtlen = param_get8(Cmd, cmdp+1);
 			cmdp += 2;
 			break;
+		case 'v':
+		case 'V':
+			verbose = true;
+			cmdp++;
+			break;
 		default:
 			PrintAndLog("Unknown parameter '%c'", param_getchar(Cmd, cmdp));
 			errors = true;
@@ -525,6 +536,7 @@ int CmdAWIDBrute(const char *Cmd) {
 	uint16_t up = cn;
 	uint16_t down = cn;
 	
+	// main loop
 	for (;;){
 	
 		if ( offline ) {
@@ -539,22 +551,22 @@ int CmdAWIDBrute(const char *Cmd) {
 		
 		// Do one up
 		if ( up < 0xFFFF )
-			if ( !sendTry(fmtlen, fc, up++, delay, bs, size)) return 1;
+			if ( !sendTry(fmtlen, fc, up++, delay, bits, size, verbose)) return 1;
 		
 		// Do one down  (if cardnumber is given)
 		if ( cn > 1 )
 			if ( down > 1 )
-				if ( !sendTry(fmtlen, fc, --down, delay, bs, size)) return 1;
+				if ( !sendTry(fmtlen, fc, --down, delay, bits, size, verbose)) return 1;
 	}
 	return 0;
 }
 
 static command_t CommandTable[] = {
-	{"help",	CmdHelp,		1, "This help"},
-	{"demod",	CmdAWIDDemod,	0, "Demodulate an AWID FSK tag from the GraphBuffer"},
-	{"read",	CmdAWIDRead,	0, "Attempt to read and extract tag data"},
-	{"sim",		CmdAWIDSim,		0, "AWID tag simulator"},
-	{"clone",	CmdAWIDClone,	0, "Clone AWID to T55x7"},
+	{"help",	CmdHelp,		1, "this help"},
+	{"demod",	CmdAWIDDemod,	0, "demodulate an AWID FSK tag from the GraphBuffer"},
+	{"read",	CmdAWIDRead,	0, "attempt to read and extract tag data"},
+	{"clone",	CmdAWIDClone,	0, "clone AWID to T55x7"},
+	{"sim",		CmdAWIDSim,		0, "simulate AWID tag"},
 	{"brute",	CmdAWIDBrute,	0, "Bruteforce card number against reader"},
 	{NULL, NULL, 0, NULL}
 };

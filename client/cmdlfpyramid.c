@@ -16,8 +16,9 @@ int usage_lf_pyramid_clone(void){
 	PrintAndLog("The facility-code is 8-bit and the card number is 16-bit.  Larger values are truncated. ");
 	PrintAndLog("Currently only works on 26bit");
 	PrintAndLog("");
-	PrintAndLog("Usage: lf pyramid clone <Facility-Code> <Card-Number>");
+	PrintAndLog("Usage: lf pyramid clone [h] <Facility-Code> <Card-Number> [Q5]");
 	PrintAndLog("Options :");
+	PrintAndLog("  h               : this help");
 	PrintAndLog("  <Facility-Code> :  8-bit value facility code");
 	PrintAndLog("  <Card Number>   : 16-bit value card number");
 	PrintAndLog("  Q5              : optional - clone to Q5 (T5555) instead of T55x7 chip");
@@ -32,8 +33,9 @@ int usage_lf_pyramid_sim(void) {
 	PrintAndLog("The facility-code is 8-bit and the card number is 16-bit.  Larger values are truncated.");
 	PrintAndLog("Currently work only on 26bit");
 	PrintAndLog("");
-	PrintAndLog("Usage:  lf pyramid sim <Card-Number>");
+	PrintAndLog("Usage:  lf pyramid sim [h] <Facility-Code> <Card-Number>");
 	PrintAndLog("Options :");
+	PrintAndLog("  h               : this help");
 	PrintAndLog("  <Facility-Code> :  8-bit value facility code");
 	PrintAndLog("  <Card Number>   : 16-bit value card number");
 	PrintAndLog("");
@@ -45,19 +47,25 @@ int usage_lf_pyramid_sim(void) {
 // FSK Demod then try to locate a Farpointe Data (pyramid) ID
 int detectPyramid(uint8_t *dest, size_t *size, int *waveStartIdx) {
 	//make sure buffer has data
-	if (*size < 128*50) return -5;
+	if (*size < 128*50) return -1;
 
 	//test samples are not just noise
-	if (justNoise(dest, *size)) return -1;
+	if (justNoise(dest, *size)) return -2;
 
-	// FSK demodulator
-	*size = fskdemod(dest, *size, 50, 1, 10, 8, waveStartIdx);  // fsk2a RF/50 
-	if (*size < 128) return -2;  //did we get a good demod?
+	// FSK demodulator RF/50 FSK 10,8
+	*size = fskdemod(dest, *size, 50, 0, 10, 8, waveStartIdx);  // pyramid fsk2
+
+	//did we get a good demod?
+	if (*size < 128) return -3;
+
 	size_t startIdx = 0;
 	uint8_t preamble[] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1};
 	if (!preambleSearch(dest, preamble, sizeof(preamble), size, &startIdx))
 		return -4; //preamble not found
-	if (*size != 128) return -3;
+
+	// wrong size?  (between to preambles)
+	if (*size != 128) return -5;
+
 	return (int)startIdx;
 }
 
@@ -97,30 +105,35 @@ int GetPyramidBits(uint32_t fc, uint32_t cn, uint8_t *pyramidBits) {
 //print full Farpointe Data/Pyramid Prox ID and some bit format details if found
 int CmdPyramidDemod(const char *Cmd) {
 	//raw fsk demod no manchester decoding no start bit finding just get binary from wave
-	uint8_t BitStream[MAX_GRAPH_TRACE_LEN]={0};
-	size_t size = getFromGraphBuf(BitStream);
-	if (size==0) return 0;
-
-	int waveIdx=0;
+	uint8_t bits[MAX_GRAPH_TRACE_LEN]={0};
+	size_t size = getFromGraphBuf(bits);
+	if (size==0) {
+		PrintAndLog("DEBUG: Error - Pyramid not enough samples");
+		return 0;
+	}
 	//get binary from fsk wave
-	int idx = detectPyramid(BitStream, &size, &waveIdx);
+	int waveIdx=0;
+	int idx = detectPyramid(bits, &size, &waveIdx);
 	if (idx < 0){
 		if (g_debugMode){
-			if (idx == -5)
+			if (idx == -1)
 				PrintAndLog("DEBUG: Error - Pyramid: not enough samples");
-			else if (idx == -1)
-				PrintAndLog("DEBUG: Error - Pyramid: only noise found");
 			else if (idx == -2)
-				PrintAndLog("DEBUG: Error - Pyramid: problem during FSK demod");
+				PrintAndLog("DEBUG: Error - Pyramid: only noise found");
 			else if (idx == -3)
-				PrintAndLog("DEBUG: Error - Pyramid: size not correct: %d", size);
+				PrintAndLog("DEBUG: Error - Pyramid: problem during FSK demod");
 			else if (idx == -4)
-				PrintAndLog("DEBUG: Error - Pyramid: preamble not found");
+				PrintAndLog("DEBUG: Error - Pyramid: preamble not found");				
+			else if (idx == -5)
+				PrintAndLog("DEBUG: Error - Pyramid: size not correct: %d", size);
 			else
-				PrintAndLog("DEBUG: Error - Pyramid: idx: %d",idx);
+				PrintAndLog("DEBUG: Error - Pyramid: error demoding fsk idx: %d",idx);
 		}
 		return 0;
 	}
+	setDemodBuf(bits, size, idx);
+	setClockGrid(50, waveIdx + (idx*50));
+	
 	// Index map
 	// 0           10          20          30            40          50          60
 	// |           |           |           |             |           |           |
@@ -143,24 +156,22 @@ int CmdPyramidDemod(const char *Cmd) {
 	// (26 bit format shown)
 
 	//get bytes for checksum calc
-	uint8_t checksum = bytebits_to_byte(BitStream + idx + 120, 8);
+	uint8_t checksum = bytebits_to_byte(bits + idx + 120, 8);
 	uint8_t csBuff[14] = {0x00};
 	for (uint8_t i = 0; i < 13; i++){
-		csBuff[i] = bytebits_to_byte(BitStream + idx + 16 + (i*8), 8);
+		csBuff[i] = bytebits_to_byte(bits + idx + 16 + (i*8), 8);
 	}
 	//check checksum calc
 	//checksum calc thanks to ICEMAN!!
 	uint32_t checkCS =  CRC8Maxim(csBuff, 13);
 
 	//get raw ID before removing parities
-	uint32_t rawLo = bytebits_to_byte(BitStream+idx+96, 32);
-	uint32_t rawHi = bytebits_to_byte(BitStream+idx+64, 32);
-	uint32_t rawHi2 = bytebits_to_byte(BitStream+idx+32, 32);
-	uint32_t rawHi3 = bytebits_to_byte(BitStream+idx, 32);
-	setDemodBuf(BitStream, 128, idx);
-	setClockGrid(50, waveIdx + (idx*50));
+	uint32_t rawLo = bytebits_to_byte(bits+idx+96, 32);
+	uint32_t rawHi = bytebits_to_byte(bits+idx+64, 32);
+	uint32_t rawHi2 = bytebits_to_byte(bits+idx+32, 32);
+	uint32_t rawHi3 = bytebits_to_byte(bits+idx, 32);
 
-	size = removeParity(BitStream, idx+8, 8, 1, 120);
+	size = removeParity(bits, idx+8, 8, 1, 120);
 	if (size != 105){
 		if (g_debugMode) {
 			if ( size == 0)
@@ -197,7 +208,7 @@ int CmdPyramidDemod(const char *Cmd) {
 	//find start bit to get fmtLen
 	int j;
 	for (j=0; j < size; ++j){
-		if(BitStream[j]) break;
+		if(bits[j]) break;
 	}
 	
 	uint8_t fmtLen = size-j-8;
@@ -206,23 +217,23 @@ int CmdPyramidDemod(const char *Cmd) {
 	uint32_t code1 = 0;
 	
 	if ( fmtLen == 26 ){
-		fc = bytebits_to_byte(BitStream+73, 8);
-		cardnum = bytebits_to_byte(BitStream+81, 16);
-		code1 = bytebits_to_byte(BitStream+72,fmtLen);
+		fc = bytebits_to_byte(bits+73, 8);
+		cardnum = bytebits_to_byte(bits+81, 16);
+		code1 = bytebits_to_byte(bits+72,fmtLen);
 		PrintAndLog("Pyramid ID Found - BitLength: %d, FC: %d, Card: %d - Wiegand: %x, Raw: %08x%08x%08x%08x", fmtLen, fc, cardnum, code1, rawHi3, rawHi2, rawHi, rawLo);
 	} else if (fmtLen == 45) {
 		fmtLen = 42; //end = 10 bits not 7 like 26 bit fmt
-		fc = bytebits_to_byte(BitStream+53, 10);
-		cardnum = bytebits_to_byte(BitStream+63, 32);
+		fc = bytebits_to_byte(bits+53, 10);
+		cardnum = bytebits_to_byte(bits+63, 32);
 		PrintAndLog("Pyramid ID Found - BitLength: %d, FC: %d, Card: %d - Raw: %08x%08x%08x%08x", fmtLen, fc, cardnum, rawHi3, rawHi2, rawHi, rawLo);
 	} else {
-		cardnum = bytebits_to_byte(BitStream+81, 16);
+		cardnum = bytebits_to_byte(bits+81, 16);
 		if (fmtLen>32){
-			//code1 = bytebits_to_byte(BitStream+(size-fmtLen),fmtLen-32);
-			//code2 = bytebits_to_byte(BitStream+(size-32),32);
+			//code1 = bytebits_to_byte(bits+(size-fmtLen),fmtLen-32);
+			//code2 = bytebits_to_byte(bits+(size-32),32);
 		PrintAndLog("Pyramid ID Found - BitLength: %d -unknown BitLength- (%d), Raw: %08x%08x%08x%08x", fmtLen, cardnum, rawHi3, rawHi2, rawHi, rawLo);
 		} else{
-			//code1 = bytebits_to_byte(BitStream+(size-fmtLen),fmtLen);
+			//code1 = bytebits_to_byte(bits+(size-fmtLen),fmtLen);
 			PrintAndLog("Pyramid ID Found - BitLength: %d -unknown BitLength- (%d), Raw: %08x%08x%08x%08x", fmtLen, cardnum, rawHi3, rawHi2, rawHi, rawLo);
 		}
 	}
@@ -250,7 +261,6 @@ int CmdPyramidClone(const char *Cmd) {
 
 	uint32_t facilitycode=0, cardnumber=0, fc = 0, cn = 0;
 	uint32_t blocks[5];
-	uint8_t i;
 	uint8_t bs[128];
 	memset(bs, 0x00, sizeof(bs));
 
@@ -267,24 +277,22 @@ int CmdPyramidClone(const char *Cmd) {
 	//Pyramid - compat mode, FSK2a, data rate 50, 4 data blocks
 	blocks[0] = T55x7_MODULATION_FSK2a | T55x7_BITRATE_RF_50 | 4 << T55x7_MAXBLOCK_SHIFT;
 
+	// Q5
 	if (param_getchar(Cmd, 2) == 'Q' || param_getchar(Cmd, 2) == 'q')
 		blocks[0] = T5555_MODULATION_FSK2 | T5555_INVERT_OUTPUT | T5555_SET_BITRATE(50) | 4 << T5555_MAXBLOCK_SHIFT;
 
-	blocks[1] = bytebits_to_byte(bs,32);
-	blocks[2] = bytebits_to_byte(bs+32,32);
-	blocks[3] = bytebits_to_byte(bs+64,32);
-	blocks[4] = bytebits_to_byte(bs+96,32);
+	blocks[1] = bytebits_to_byte(bs, 32);
+	blocks[2] = bytebits_to_byte(bs + 32, 32);
+	blocks[3] = bytebits_to_byte(bs + 64, 32);
+	blocks[4] = bytebits_to_byte(bs + 96, 32);
 
 	PrintAndLog("Preparing to clone Farpointe/Pyramid to T55x7 with Facility Code: %u, Card Number: %u", facilitycode, cardnumber);
-	PrintAndLog("Blk | Data ");
-	PrintAndLog("----+------------");
-	for ( i = 0; i<5; ++i )
-		PrintAndLog(" %02d | 0x%08" PRIx32, i, blocks[i]);
+	print_blocks(blocks, 5);
 
 	UsbCommand resp;
 	UsbCommand c = {CMD_T55XX_WRITE_BLOCK, {0,0,0}};
 
-	for ( i = 0; i<5; ++i ) {
+	for (uint8_t i = 0; i < 5; ++i ) {
 		c.arg[0] = blocks[i];
 		c.arg[1] = i;
 		clearCommandBuffer();
@@ -309,10 +317,11 @@ int CmdPyramidSim(const char *Cmd) {
 	memset(bs, 0x00, size);
 	
 	// Pyramid uses:  fcHigh: 10, fcLow: 8, clk: 50, invert: 0
-	uint64_t arg1, arg2;
-	arg1 = (10 << 8) + 8;
-	arg2 = 50 | 0;
-
+	uint8_t clk = 50, invert = 0, high = 10, low = 8;
+	uint16_t arg1, arg2;	
+	arg1 = high << 8 | low;
+	arg2 = invert << 8 | clk;
+	
 	if (sscanf(Cmd, "%u %u", &fc, &cn ) != 2) return usage_lf_pyramid_sim();
 
 	facilitycode = (fc & 0x000000FF);
@@ -333,11 +342,11 @@ int CmdPyramidSim(const char *Cmd) {
 }
 
 static command_t CommandTable[] = {
-    {"help",	CmdHelp,		1, "This help"},
-	{"demod",	CmdPyramidDemod,0, "Demodulate a Pyramid FSK tag from the GraphBuffer"},	
-	{"read",	CmdPyramidRead,	0, "Attempt to read and extract tag data"},
-	{"clone",	CmdPyramidClone,0, "<Facility-Code> <Card Number>  clone pyramid tag"},
-	{"sim",		CmdPyramidSim,	0, "<Facility-Code> <Card Number>  simulate pyramid tag"},
+    {"help",	CmdHelp,		1, "this help"},
+	{"demod",	CmdPyramidDemod,0, "demodulate a Pyramid FSK tag from the GraphBuffer"},
+	{"read",	CmdPyramidRead,	0, "attempt to read and extract tag data"},
+	{"clone",	CmdPyramidClone,0, "clone pyramid tag"},
+	{"sim",		CmdPyramidSim,	0, "simulate pyramid tag"},
     {NULL, NULL, 0, NULL}
 };
 

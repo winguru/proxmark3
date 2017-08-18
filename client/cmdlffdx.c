@@ -62,7 +62,6 @@ int usage_lf_fdx_sim(void) {
 	return 0;
 }
 
-
 // Ask/Biphase Demod then try to locate an ISO 11784/85 ID
 // BitStream must contain previously askrawdemod and biphasedemoded data
 int detectFDXB(uint8_t *dest, size_t *size) {
@@ -323,10 +322,6 @@ int CmdFdxClone(const char *Cmd) {
 	countryid = param_get32ex(Cmd, 0, 0, 10);
 	animalid = param_get64ex(Cmd, 1, 0, 10);
 	
-	//Q5
-	if (param_getchar(Cmd, 2) == 'Q' || param_getchar(Cmd, 2) == 'q')
-		blocks[0] = T5555_MODULATION_BIPHASE | T5555_INVERT_OUTPUT | T5555_SET_BITRATE(32) | 4 << T5555_MAXBLOCK_SHIFT;
-	
 	verify_values(countryid, animalid);
 	
 	// getFDXBits(uint64_t national_id, uint16_t country, uint8_t isanimal, uint8_t isextended, uint32_t extended, uint8_t *bits) 
@@ -334,21 +329,19 @@ int CmdFdxClone(const char *Cmd) {
 		PrintAndLog("Error with tag bitstream generation.");
 		return 1;
 	}	
-	
+
+	//Q5
+	if (param_getchar(Cmd, 2) == 'Q' || param_getchar(Cmd, 2) == 'q')
+		blocks[0] = T5555_MODULATION_BIPHASE | T5555_INVERT_OUTPUT | T5555_SET_BITRATE(32) | 4 << T5555_MAXBLOCK_SHIFT;
+
 	// convert from bit stream to block data
-	blocks[1] = bytebits_to_byte(bs,32);
-	blocks[2] = bytebits_to_byte(bs+32,32);
-	blocks[3] = bytebits_to_byte(bs+64,32);
-	blocks[4] = bytebits_to_byte(bs+96,32);
+	blocks[1] = bytebits_to_byte(bs, 32);
+	blocks[2] = bytebits_to_byte(bs + 32, 32);
+	blocks[3] = bytebits_to_byte(bs + 64, 32);
+	blocks[4] = bytebits_to_byte(bs + 96, 32);
 
 	PrintAndLog("Preparing to clone FDX-B to T55x7 with animal ID: %04u-%"PRIu64, countryid, animalid);
-	PrintAndLog("Blk | Data ");
-	PrintAndLog("----+------------");
-	PrintAndLog(" 00 | 0x%08x", blocks[0]);
-	PrintAndLog(" 01 | 0x%08x", blocks[1]);
-	PrintAndLog(" 02 | 0x%08x", blocks[2]);
-	PrintAndLog(" 03 | 0x%08x", blocks[3]);
-	PrintAndLog(" 04 | 0x%08x", blocks[4]);
+	print_blocks(blocks, 5);
 	
 	UsbCommand resp;
 	UsbCommand c = {CMD_T55XX_WRITE_BLOCK, {0,0,0}};
@@ -378,6 +371,7 @@ int CmdFdxSim(const char *Cmd) {
 	
 	verify_values(countryid, animalid);
 	
+	// 32, no STT, BIPHASE INVERTED == diphase
 	uint8_t clk = 32, encoding = 2, separator = 0, invert = 1;
 	uint16_t arg1, arg2;
 	size_t size = 128;
@@ -396,11 +390,11 @@ int CmdFdxSim(const char *Cmd) {
 }
 
 static command_t CommandTable[] = {
-    {"help",	CmdHelp,	1, "This help"},
-	{"demod", CmdFdxDemod, 1, "Attempt to extract FDX-B ISO11784/85 data from the GraphBuffer"},
-	{"read",  CmdFdxRead, 0, "Attempt to read and extract FDX-B ISO11784/85 data"},
-	{"clone", CmdFdxClone, 0, "Clone animal ID tag to T55x7 (or to q5/T5555)"},
-	{"sim",		CmdFdxSim,	0, "Animal ID tag simulator"},
+    {"help",	CmdHelp,	1, "this help"},
+	{"demod",	CmdFdxDemod,1, "demodulate a FDX-B ISO11784/85 tag from the GraphBuffer"},
+	{"read",	CmdFdxRead,	0, "attempt to read and extract tag data"},
+	{"clone",	CmdFdxClone,0, "clone animal ID tag to T55x7 (or to q5/T5555)"},
+	{"sim",		CmdFdxSim,	0, "simulate Animal ID tag"},
     {NULL, NULL, 0, NULL}
 };
 
