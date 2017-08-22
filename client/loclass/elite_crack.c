@@ -281,10 +281,9 @@ int _readFromDump(uint8_t dump[], dumpdata* item, uint8_t i)
 {
 	size_t itemsize = sizeof(dumpdata);
 	//dumpdata item =  {0};
-	memcpy(item,dump+i*itemsize, itemsize);
+	memcpy(item, dump+i*itemsize, itemsize);
 
-	if(true)
-	{
+	if(true) {
 		printvar("csn", item->csn,8);
 		printvar("cc_nr", item->cc_nr,12);
 		printvar("mac", item->mac,4);
@@ -292,7 +291,7 @@ int _readFromDump(uint8_t dump[], dumpdata* item, uint8_t i)
 	return 0;
 }
 
-static uint32_t startvalue = 0;
+//static uint32_t startvalue = 0;
 /**
  * @brief Performs brute force attack against a dump-data item, containing csn, cc_nr and mac.
  *This method calculates the hash1 for the CSN, and determines what bytes need to be bruteforced
@@ -354,22 +353,22 @@ int bruteforceItem(dumpdata item, uint16_t keytable[])
 	/*
 	 *A uint32 has room for 4 bytes, we'll only need 24 of those bits to bruteforce up to three bytes,
 	 */
-	uint32_t brute = startvalue;
+	//uint32_t brute = startvalue;
+	uint32_t brute = 0;
 	/*
 	   Determine where to stop the bruteforce. A 1-byte attack stops after 256 tries,
 	   (when brute reaches 0x100). And so on...
-	   bytes_to_recover = 1 --> endmask = 0x0000100
-	   bytes_to_recover = 2 --> endmask = 0x0010000
-	   bytes_to_recover = 3 --> endmask = 0x1000000
+	   bytes_to_recover = 1 --> endmask = 0x000000100
+	   bytes_to_recover = 2 --> endmask = 0x000010000
+	   bytes_to_recover = 3 --> endmask = 0x001000000
 	*/
 
 	uint32_t endmask =  1 << 8*numbytes_to_recover;
 
-	for(i =0 ; i < numbytes_to_recover && numbytes_to_recover > 1; i++)
+	for (i =0 ; i < numbytes_to_recover && numbytes_to_recover > 1; i++)
 		prnlog("Bruteforcing byte %d", bytes_to_recover[i]);
 
-	while(!found && !(brute & endmask))
-	{
+	while (!found && !(brute & endmask)) {
 		//Update the keytable with the brute-values
 		for (i=0; i < numbytes_to_recover; i++) {
 			keytable[bytes_to_recover[i]] &= 0xFF00;
@@ -393,22 +392,24 @@ int bruteforceItem(dumpdata item, uint16_t keytable[])
 		//Calc mac
 		doMAC(item.cc_nr, div_key, calculated_MAC);
 
-		if(memcmp(calculated_MAC, item.mac, 4) == 0) {
-			for(i =0 ; i < numbytes_to_recover; i++)
-				prnlog("=> %d: 0x%02x", bytes_to_recover[i],0xFF & keytable[bytes_to_recover[i]]);
+		if (memcmp(calculated_MAC, item.mac, 4) == 0) {
+			printf("\r\n");
+			for(i =0 ; i < numbytes_to_recover; i++) {
+				prnlog("=> %d: 0x%02x", bytes_to_recover[i],0xFF & keytable[bytes_to_recover[i]]);	
+			}
 			found = true;
 			break;
 		}
 		
 		brute++;
 		if ((brute & 0xFFFF) == 0) {
-			printf("%d",(brute >> 16) & 0xFF);
+			printf("%d,",(brute >> 16) & 0xFF);
 			fflush(stdout);
 		}
 	}
 	if (!found) {
-		prnlog("Failed to recover %d bytes using the following CSN",numbytes_to_recover);
-		printvar("CSN",item.csn,8);
+		prnlog("Failed to recover %d bytes using the following CSN", numbytes_to_recover);
+		printvar("CSN", item.csn, 8);
 		errors++;
 
 		//Before we exit, reset the 'BEING_CRACKED' to zero
@@ -424,7 +425,6 @@ int bruteforceItem(dumpdata item, uint16_t keytable[])
 	}
 	return errors;
 }
-
 
 /**
  * From dismantling iclass-paper:
@@ -509,13 +509,13 @@ int bruteforceDump(uint8_t dump[], size_t dumpsize, uint16_t keytable[])
 
 	for(i = 0 ; i * itemsize < dumpsize ; i++ )
 	{
-		memcpy(attack,dump+i*itemsize, itemsize);
+		memcpy(attack, dump + i * itemsize, itemsize);
 		errors += bruteforceItem(*attack, keytable);
 	}
 	free(attack);
 	t1 = msclock() - t1;
 	float diff = ((float)t1 / CLOCKS_PER_SEC );
-	prnlog("\nPerformed full crack in %f seconds",diff);
+	prnlog("\nPerformed full crack in %.1f seconds", diff);
 
 	// Pick out the first 16 bytes of the keytable.
 	// The keytable is now in 16-bit ints, where the upper 8 bits
@@ -523,13 +523,11 @@ int bruteforceDump(uint8_t dump[], size_t dumpsize, uint16_t keytable[])
 	// master key calculation
 	uint8_t first16bytes[16] = {0};
 
-	for(i = 0 ; i < 16 ; i++)
-	{
+	for (i = 0 ; i < 16 ; i++) {
 		first16bytes[i] = keytable[i] & 0xFF;
+		
 		if(!(keytable[i] & CRACKED))
-		{
 			prnlog("Error, we are missing byte %d, custom key calculation will fail...", i);
-		}
 	}
 	errors += calculateMasterKey(first16bytes, NULL);
 	return errors;
@@ -565,9 +563,9 @@ int bruteforceFile(const char *filename, uint16_t keytable[])
 	if (f) fclose(f);
 	
     if (bytes_read < fsize) {
-        prnlog("Error, could only read %d bytes (should be %d)",bytes_read, fsize );
+        prnlog("Error, could only read %d bytes (should be %d)", bytes_read, fsize );
     }
-	uint8_t res = bruteforceDump(dump,fsize,keytable);
+	uint8_t res = bruteforceDump(dump, fsize, keytable);
 	free(dump);
 	return res;
 }
@@ -589,11 +587,10 @@ int bruteforceFileNoKeys(const char *filename)
 // ----------------------------------------------------------------------------
 // TEST CODE BELOW
 // ----------------------------------------------------------------------------
-
 int _testBruteforce()
 {
 	int errors = 0;
-	if(true){
+	if (true) {
 		// First test
 		prnlog("[+] Testing crack from dumpfile...");
 
@@ -616,11 +613,11 @@ int _testBruteforce()
 
 		//Test a few variants
 		if (fileExists("iclass_dump.bin")){
-			errors |= bruteforceFile("iclass_dump.bin",keytable);
+			errors |= bruteforceFile("iclass_dump.bin", keytable);
 		} else if (fileExists("loclass/iclass_dump.bin")){
-			errors |= bruteforceFile("loclass/iclass_dump.bin",keytable);
+			errors |= bruteforceFile("loclass/iclass_dump.bin", keytable);
 		} else if (fileExists("client/loclass/iclass_dump.bin")){
-			errors |= bruteforceFile("client/loclass/iclass_dump.bin",keytable);
+			errors |= bruteforceFile("client/loclass/iclass_dump.bin", keytable);
 		} else {
 			prnlog("Error: The file iclass_dump.bin was not found!");
 		}
@@ -637,16 +634,14 @@ int _test_iclass_key_permutation()
 	permutekey(testcase, testcase_output);
 	permutekey_rev(testcase_output, testcase_output_rev);
 
-	if(memcmp(testcase_output, testcase_output_correct,8) != 0)
-	{
+	if (memcmp(testcase_output, testcase_output_correct,8) != 0) {
 		prnlog("Error with iclass key permute!");
 		printarr("testcase_output", testcase_output, 8);
 		printarr("testcase_output_correct", testcase_output_correct, 8);
 		return 1;
 
 	}
-	if(memcmp(testcase, testcase_output_rev, 8) != 0)
-	{
+	if (memcmp(testcase, testcase_output_rev, 8) != 0) {
 		prnlog("Error with reverse iclass key permute");
 		printarr("testcase", testcase, 8);
 		printarr("testcase_output_rev", testcase_output_rev, 8);
@@ -658,12 +653,12 @@ int _test_iclass_key_permutation()
 }
 int _testHash1()
 {
-    uint8_t csn[8]= {0x01,0x02,0x03,0x04,0xF7,0xFF,0x12,0xE0};
+    uint8_t expected[8] = {0x7E,0x72,0x2F,0x40,0x2D,0x02,0x51,0x42};
+    uint8_t csn[8] = {0x01,0x02,0x03,0x04,0xF7,0xFF,0x12,0xE0};
     uint8_t k[8] = {0};
     hash1(csn, k);
-    uint8_t expected[8] = {0x7E,0x72,0x2F,0x40,0x2D,0x02,0x51,0x42};
-    if(memcmp(k,expected,8) != 0)
-    {
+
+    if (memcmp(k,expected,8) != 0) {
         prnlog("Error with hash1!");
         printarr("calculated", k, 8);
         printarr("expected", expected, 8);

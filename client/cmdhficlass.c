@@ -12,11 +12,11 @@
 
 #include "cmdhficlass.h"
 
+#define NUM_CSNS 8
+#define ICLASS_KEYS_MAX 8
+
 static int CmdHelp(const char *Cmd);
 
-#define NUM_CSNS 8
-
-#define ICLASS_KEYS_MAX 8
 static uint8_t iClass_Key_Table[ICLASS_KEYS_MAX][8] = {
 		{ 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 },
 		{ 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 },
@@ -240,55 +240,66 @@ int CmdHFiClassSnoop(const char *Cmd) {
 }
 
 int CmdHFiClassSim(const char *Cmd) {
-	uint8_t simType = 0;
-	uint8_t CSN[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 	if (strlen(Cmd)<1) return usage_hf_iclass_sim();
 
+	uint8_t simType = 0;
+	uint8_t CSN[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
 	simType = param_get8ex(Cmd, 0, 0, 10);
 
-	if(simType == 0)
-	{
+	if (simType == 0) {
 		if (param_gethex(Cmd, 1, CSN, 16)) {
 			PrintAndLog("A CSN should consist of 16 HEX symbols");
 			return usage_hf_iclass_sim();
 		}
-
 		PrintAndLog("--simtype:%02x csn:%s", simType, sprint_hex(CSN, 8));
 	}
 
-	if(simType > 3)
-	{
+	if (simType > 3) {
 		PrintAndLog("Undefined simptype %d", simType);
 		return usage_hf_iclass_sim();
 	}
 
-	uint8_t numberOfCSNs=0;
-	if(simType == 2)
-	{
+	uint8_t numberOfCSNs = 0;
+	if (simType == 2) {
 		UsbCommand c = {CMD_SIMULATE_TAG_ICLASS, {simType,NUM_CSNS}};
 		UsbCommand resp = {0};
 
+/*
 		// pre-defined 8 CSN by Holiman
-		// but new entry[0] by iceman
 		uint8_t csns[8*NUM_CSNS] = {		
-			//0X00, 0X0B, 0X0F, 0XFF, 0XF7, 0XFF, 0X12, 0XE0, // 0,1,69
-			0x00, 0x8b, 0x8f, 0x7f, 0xf7, 0xff, 0x12, 0xe0,
-			0X00, 0X13, 0X94, 0X7E, 0X76, 0XFF, 0X12, 0XE0, // 2,12
-			0X2A, 0X99, 0XAC, 0X79, 0XEC, 0XFF, 0X12, 0XE0,	// 7,11
-			0X17, 0X12, 0X01, 0XFD, 0XF7, 0XFF, 0X12, 0XE0, // 3,15
-			0XCD, 0X56, 0X01, 0X7C, 0X6F, 0XFF, 0X12, 0XE0, // 4,8
-			0X4B, 0X5E, 0X0B, 0X72, 0XEF, 0XFF, 0X12, 0XE0, // 6,14
-			0X00, 0X73, 0XD8, 0X75, 0X58, 0XFF, 0X12, 0XE0, // 9,5
-			0X0C, 0X90, 0X32, 0XF3, 0X5D, 0XFF, 0X12, 0XE0  // 10,13
+			0x00, 0x0B, 0x0F, 0xFF, 0xF7, 0xFF, 0x12, 0xE0, 
+			0x00, 0x13, 0x94, 0x7E, 0x76, 0xFF, 0x12, 0xE0, 
+			0x2A, 0x99, 0xAC, 0x79, 0xEC, 0xFF, 0x12, 0xE0,	
+			0x17, 0x12, 0x01, 0xFD, 0xF7, 0xFF, 0x12, 0xE0, 
+			0xCD, 0x56, 0x01, 0x7C, 0x6F, 0xFF, 0x12, 0xE0, 
+			0x4B, 0x5E, 0x0B, 0x72, 0xEF, 0xFF, 0x12, 0xE0, 
+			0x00, 0x73, 0xD8, 0x75, 0x58, 0xFF, 0x12, 0xE0, 
+			0x0C, 0x90, 0x32, 0xF3, 0x5D, 0xFF, 0x12, 0xE0  
 		};
-		
-/*		
-		// pre-defined 15 CSN by Carl55
-		// but new entry[0] by iceman
+*/
+/*
+		pre-defined 8 CSN by iceman		
+		only one csn depend on several others. 
+		six depends only on the first csn,  (0,1, 0x45)
+*/
 		uint8_t csns[8*NUM_CSNS] = {
-			//0x00, 0x0B, 0x0F, 0xFF, 0xF7, 0xFF, 0x12, 0xE0,
-			0x00, 0x8b, 0x8f, 0x7f, 0xf7, 0xff, 0x12, 0xe0,
+			0x01, 0x0A, 0x0F, 0xFF, 0xF7, 0xFF, 0x12, 0xE0, 
+			0x0C, 0x06, 0x0C, 0xFE, 0xF7, 0xFF, 0x12, 0xE0, 
+			0x10, 0x97, 0x83, 0x7B, 0xF7, 0xFF, 0x12, 0xE0, 
+			0x13, 0x97, 0x82, 0x7A, 0xF7, 0xFF, 0x12, 0xE0, 
+			0x07, 0x0E, 0x0D, 0xF9, 0xF7, 0xFF, 0x12, 0xE0, 
+			0x14, 0x96, 0x84, 0x76, 0xF7, 0xFF, 0x12, 0xE0, 
+			0x17, 0x96, 0x85, 0x71, 0xF7, 0xFF, 0x12, 0xE0, 
+			0x04, 0x08, 0x9F, 0x78, 0x6E, 0xFF, 0x12, 0xE0
+		};
+
+/*
+		// pre-defined 15 CSN by Carl55
+		// remember to change the define NUM_CSNS to match.
+		uint8_t csns[8*NUM_CSNS] = {
+			0x00, 0x0B, 0x0F, 0xFF, 0xF7, 0xFF, 0x12, 0xE0,
 			0x00, 0x04, 0x0E, 0x08, 0xF7, 0xFF, 0x12, 0xE0,
 			0x00, 0x09, 0x0D, 0x05, 0xF7, 0xFF, 0x12, 0xE0,
 			0x00, 0x0A, 0x0C, 0x06, 0xF7, 0xFF, 0x12, 0xE0,
@@ -328,13 +339,13 @@ int CmdHFiClassSim(const char *Cmd) {
 		 * CC are all zeroes, CSN is the same as was sent in
 		 **/
 		void* dump = malloc(datalen);
-		memset(dump,0,datalen);//<-- Need zeroes for the CC-field
+		memset(dump, 0, datalen);//<-- Need zeroes for the CC-field
 		uint8_t i = 0;
-		for(i = 0 ; i < NUM_CSNS ; i++) {
-			memcpy(dump+i*24, csns+i*8, 8); //CSN
+		for (i = 0 ; i < NUM_CSNS ; i++) {
+			memcpy(dump + i*24, csns + i*8, 8); //CSN
 			//8 zero bytes here...
 			//Then comes NR_MAC (eight bytes from the response)
-			memcpy(dump+i*24+16, resp.d.asBytes+i*8, 8);
+			memcpy(dump + i*24 + 16, resp.d.asBytes + i*8, 8);
 		}
 		/** Now, save to dumpfile **/
 		saveFile("iclass_mac_attack", "bin", dump, datalen);
